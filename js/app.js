@@ -36,6 +36,7 @@
           <ul class="bteach">${b.teaches.map(t => '<li>' + esc(t) + '</li>').join('')}</ul>
           <div class="bactions">
             <button class="go free" data-b="${b.id}">Mode libre</button>
+            <button class="go cds" data-b="${b.id}" data-cds="1"><b>Essais en commission de sécurité</b><small>Anomalies cachées</small></button>
             ${mis.map(m => `<button class="go mis" data-b="${b.id}" data-m="${Object.keys(MIS).find(k => MIS[k] === m)}"><b>${esc(m.title)}</b><small>${esc(m.level)}</small></button>`).join('')}
           </div>`;
         wrap.appendChild(card);
@@ -44,16 +45,27 @@
         const g = e.target.closest('.go');
         if (!g) return;
         this.sound.unlock();
-        this.start(g.dataset.b, g.dataset.m || null);
+        this.start(g.dataset.b, g.dataset.m || null, { cds: !!g.dataset.cds });
       };
+      const st = $('#studentMode');
+      try { st.checked = localStorage.getItem('ssi-student') === '1'; } catch (e) { /* stockage indisponible */ }
+      st.onchange = () => { try { localStorage.setItem('ssi-student', st.checked ? '1' : '0'); } catch (e) { /* rien */ } };
       $('#home').hidden = false; $('#sim').hidden = true;
       document.title = 'Simulateur SSI';
     },
 
     /* ---------------------------- DÉMARRAGE -------------------------- */
-    start(bid, missionId) {
+    start(bid, missionId, opts = {}) {
       const b = B.find(x => x.id === bid);
       this.missionId = missionId;
+      this.startOpts = opts;
+      this.cdsMode = !!opts.cds;
+      this.student = $('#studentMode').checked;
+      this.revealed = false;
+      this.marks = {};
+      this.pending = [];
+      this.incident = null;
+      this.truth = null;
       this.sim = new window.SSISim(b);
       const s = this.sim;
       this.ended = false;
@@ -68,6 +80,15 @@
         onOpening: (id, ev) => this.openingMenu(id, ev),
         onFan: (id, kind, ev) => this.fanMenu(id, kind, ev)
       });
+      this.plan.marks = this.marks;
+      this.plan.showFaults = this.trainer;
+      this.plan.hidden = this.student;
+      this.plan.setZones(this.student);
+      $('[data-zonesbtn]').classList.toggle('on', this.student);
+      $('[data-tb="reveal"]').hidden = !this.student;
+      $('[data-tb="reveal"]').textContent = '👁 Révéler';
+      document.body.classList.toggle('student', this.student);
+      this.applyStudentDrawer();
       // puces de niveaux
       const chips = $('[data-levels]');
       chips.innerHTML = b.levels.map((l, i) => `<button data-li="${i}">${l.name}</button>`).reverse().join('');
@@ -75,14 +96,14 @@
       // journaux
       ['explain', 'log'].forEach(k => { $(`[data-body="${k}"]`).innerHTML = ''; });
       s.on('explain', e => this.addExplain(e));
-      s.on('log', e => this.addLog(e));
+      s.on('log', e => { if (!(e.secret && this.isHidden())) this.addLog(e); });
       s.on('agent', d => this.agentReport(d));
       s.on('request', txt => this.toast(txt, 'alarm', 9000));
       // la première alarme amène le plan sur le niveau concerné
       s.on('log', e => {
-        if ((e.kind === 'fire' || e.kind === 'alarm') && !this._focused) {
+        if ((e.kind === 'fire' || e.kind === 'alarm') && !this._focused && !(e.secret && this.isHidden())) {
           const ev = s.ecs.events[0];
-          const room = ev ? ev.room : Object.keys(s.rooms).find(id => s.rooms[id].fire);
+          const room = ev ? ev.room : this.isHidden() ? null : Object.keys(s.rooms).find(id => s.rooms[id].fire);
           if (room) { this._focused = true; this.plan.scrollToLevel(s.rooms[room].level); }
         }
       });
@@ -91,7 +112,14 @@
       this.renderTrainer();
       this.setSpeed(1);
       this.addExplain({ time: '00:00', kind: 'info', text: 'Bienvenue dans ' + b.name + '. ' + b.summary + ' Clique sur un local pour y allumer un feu, ou sur un équipement pour l\'actionner.' });
-      if (missionId) {
+      this.cds = null;
+      if (this.cdsMode) {
+        this.mission = null; s.mission = null;
+        this.cds = window.SSI_CDS.setup(s);
+        this.renderCds();
+        this.paused = true;
+        this.showCdsBrief();
+      } else if (missionId) {
         const m = MIS[missionId];
         this.mission = m;
         s.mission = m;
@@ -102,8 +130,9 @@
       } else {
         this.mission = null;
         $('#mission').hidden = true;
+        if (this.student) { this.paused = true; this.showStudentBrief(); }
       }
-      this.renderMission();
+      if (!this.cds) this.renderMission();
       if (!this.loopOn) { this.loopOn = true; this.last = performance.now(); requestAnimationFrame(t => this.loop(t)); }
     },
 
@@ -123,6 +152,8 @@
           this.sound.set(s.uga.state === 'ag', (s.ecs.buzzer || s.uga.buzzer) && !this.paused);
           $('[data-tb="call"]').classList.toggle('done', s.firemen.called !== null);
           if (this.mission) this.checkMission();
+          if (this.cds) this.updateCds();
+          this.pending = this.pending.filter(p => { if (s.t >= p.t) { p.run(); return false; } return true; });
           if (!$('[data-body="corr"]').hidden) this.updateCorr();
           if (!$('[data-body="occ"]').hidden) this.updateOcc();
           if (this.menuRefresh) this.menuRefresh();
@@ -184,6 +215,11 @@
     },
     updateOcc() {
       const s = this.sim, st = s.stats();
+      if (this.isHidden()) {
+        $('[data-body="occ"]').innerHTML = `<div class="occ-sum"><div><b>${st.occ0}</b><span>effectif attendu (registre)</span></div><div><b>${st.evac}</b><span>comptés au point de rassemblement</span></div><div><b>${Math.max(0, st.occ0 - st.evac)}</b><span>manquants à l'appel</span></div></div>
+          <p class="note">Vue élève : tu ne sais pas où sont les personnes manquantes. Les rondes et les levées de doute te le diront.</p>`;
+        return;
+      }
       const rows = s.b.levels.map((L, li) => {
         const rs = Object.values(s.rooms).filter(r => r.level === li && r.occ0 > 0);
         const inside = rs.reduce((a, r) => a + r.occ, 0), out = rs.reduce((a, r) => a + r.evac, 0);
@@ -230,6 +266,7 @@
 
     roomMenu(id, ev) {
       const s = this.sim, r = s.rooms[id];
+      if (this.isHidden()) return this.roomMenuStudent(id, ev);
       const sub = () => {
         const f = r.fire;
         return `<span>Fumée <b>${Math.round(r.s * 100)} %</b></span><span>Température <b>${Math.round(r.T)} °C</b></span>` +
@@ -243,6 +280,7 @@
         a.push({ label: '🧑‍🚒 Envoyer un agent (levée de doute)', hint: 'Il part du poste de sécurité', run: () => { const res = s.sendAgent(id); return res.ok ? { ok: true, msg: 'Agent en route : arrivée dans ' + res.eta + ' s.' } : res; } });
         if (s.agent && s.agent.done && s.agent.room === id && s.agent.fire) a.push({ label: '🧯 Attaquer à l\'extincteur', run: () => s.agentExtinguisher() });
         if (r.s > 0.03 && !(r.fire && r.fire.stage !== 'éteint') && r.def.kind !== 'stair') a.push({ label: r.aired ? '🪟 Fenêtres ouvertes' : '🪟 Aérer le local (ouvrir les fenêtres)', hint: 'Une fois le feu éteint', disabled: !!r.aired, run: () => { r.aired = true; s.journal('Aération de ' + s.roomName(id), 'info'); } });
+        a.push({ label: '🔦 Ronde du niveau ' + s.b.levels[r.level].name, hint: 'L\'agent rend compte par radio', run: () => { const res = s.patrol(r.level); return res.ok ? { ok: true, msg: 'Ronde lancée : compte rendu dans ' + res.eta + ' s.' } : res; } });
         if (this.trainer) {
           a.push({ sep: true });
           a.push({ label: 'Ajouter de la fumée froide', hint: 'Sans feu, pour tester la détection', run: () => { r.s = Math.min(1, r.s + 0.3); } });
@@ -262,9 +300,12 @@
         let x = `<span>${esc(d.def.label || '')}</span>`;
         if (d.def.zd) x += `<span>Zone <b>${d.def.zd}</b></span>`;
         if (d.def.zs) x += `<span>Zone <b>${[].concat(d.def.zs).join(', ')}</b></span>`;
-        if (t === 'DI') x += `<span>État <b>${d.state === 'alarme' ? 'ALARME' : 'veille'}</b>${d.fault ? ' · défaut : ' + d.fault : ''}</span>`;
-        if (t === 'DM' || t === 'DCM') x += `<span>État <b>${d.state === 'actionne' ? 'actionné' : 'veille'}</b></span>`;
-        if (das) x += `<span>Position <b>${das.state === 'PA' ? 'attente' : das.state === 'PS' ? 'sécurité' : 'en mouvement'}</b>${das.fault ? ' · BLOQUÉ' : ''}${das.ordered ? ' · ordre actif' : ''}</span>`;
+        if (this.isHidden()) return x + '<span>Vue élève : état inconnu depuis le poste de sécurité</span>';
+        const tf = this.trainer;
+        if (t === 'DI') x += `<span>État <b>${d.state === 'alarme' ? 'ALARME' : 'veille'}</b>${d.fault && tf ? ' · défaut : ' + d.fault : ''}</span>`;
+        if (t === 'DM' || t === 'DCM' || t === 'BAASMA') x += `<span>État <b>${d.state === 'actionne' ? 'actionné' : 'veille'}</b>${d.fault && tf ? ' · HORS D\'USAGE' : ''}</span>`;
+        if (t === 'DS' && tf && d.fault) x += '<span><b class="bad">Diffuseur muet</b></span>';
+        if (das) x += `<span>Position <b>${das.state === 'PA' ? 'attente' : das.state === 'PS' ? 'sécurité' : 'en mouvement'}</b>${das.fault && tf ? ' · BLOQUÉ' : ''}${das.ordered ? ' · ordre actif' : ''}</span>`;
         return x;
       };
       const items = () => {
@@ -284,6 +325,12 @@
           else a.push({ label: '🔑 Réarmer avec la clé', run: () => s.resetDM(id) });
         }
         if (t === 'DMV') a.push({ label: '🟩 Actionner : déverrouiller l\'issue', run: () => s.pressDMV(id) });
+        if (t === 'BAASMA') {
+          if (s.uga.state !== 'ag') a.push({ label: '🔔 Déclencher l\'alarme', cls: 'danger', run: () => s.pressBAAS(id) });
+          else a.push({ label: '🔑 Arrêter l\'alarme (clé)', run: () => s.stopBAAS(id) });
+        }
+        if (t === 'DS' && this.trainer) a.push(d.fault ? { label: 'Réparer le diffuseur', run: () => { d.fault = null; } } : { label: 'Rendre ce diffuseur muet', cls: 'danger', run: () => { d.fault = 'muet'; } });
+        if (t === 'DM' && this.trainer) a.push(d.fault ? { label: 'Réparer le déclencheur', run: () => { d.fault = null; } } : { label: 'Mettre hors d\'usage', cls: 'danger', run: () => { d.fault = 'hs'; } });
         if (t === 'DCM') {
           if (d.state !== 'actionne') a.push({ label: '🟨 Actionner la commande', cls: 'amber', run: () => s.pressDCM(id) });
           else a.push({ label: '🔧 Réarmer sur place', run: () => s.resetDCM(id) });
@@ -298,7 +345,7 @@
         if (!a.length) a.push({ label: 'Aucune action possible ici', disabled: true });
         return a;
       };
-      const names = { DI: d.def.sdad ? 'Détecteur autonome déclencheur' : 'Détecteur automatique', DM: 'Déclencheur manuel', DMV: 'Déclencheur manuel vert', DS: 'Diffuseur d\'évacuation', VD: 'Volet de désenfumage', VA: 'Volet d\'amenée d\'air', OUV: 'Ouvrant de façade', EXU: 'Exutoire', CLAPET: 'Clapet coupe-feu', DCM: 'Commande manuelle (DCM)' };
+      const names = { DI: d.def.sdad ? 'Détecteur autonome déclencheur' : 'Détecteur automatique', DM: 'Déclencheur manuel', DMV: 'Déclencheur manuel vert', DS: 'Diffuseur d\'évacuation', VD: 'Volet de désenfumage', VA: 'Volet d\'amenée d\'air', OUV: 'Ouvrant de façade', EXU: 'Exutoire', CLAPET: 'Clapet coupe-feu', DCM: 'Commande manuelle (DCM)', BAASMA: 'Bloc autonome d\'alarme manuel (BAAS Ma)' };
       this.openMenu(ev, (names[t] || t) + ' · ' + id, st, items, FI[fiche] ? fiche : null, true);
     },
 
@@ -306,12 +353,19 @@
       const s = this.sim, o = s.openings[id];
       const kind = o.def.kind;
       const title = kind === 'cf_auto' ? 'Porte coupe-feu à fermeture automatique' : kind === 'exit' ? 'Issue de secours' : 'Porte';
+      const hid = this.isHidden();
+      if (hid) {
+        return this.openMenu(ev, title + ' · ' + id, `<span>${s.roomName(o.def.a)} ↔ ${s.roomName(o.def.b)}</span><span>Vue élève : état inconnu depuis le poste</span>`,
+          [{ label: '🧑‍🚒 Envoyer un agent vérifier cette porte', hint: 'Il la libère si elle est calée', run: () => { const res = s.checkDoor(id); return res.ok ? { ok: true, msg: 'Agent en route : compte rendu dans ' + res.eta + ' s.' } : res; } }],
+          kind === 'cf_auto' ? 'door' : kind === 'exit' ? 'exit' : null);
+      }
       const sub = () => `<span>${s.roomName(o.def.a)} ↔ ${s.roomName(o.def.b)}</span><span>État <b>${o.burnt ? 'détruite' : o.open ? 'ouverte' : 'fermée'}</b>${o.wedged ? ' · <b class="bad">CALÉE</b>' : ''}${o.def.locked ? (o.locked ? ' · verrouillée' : ' · déverrouillée') : ''}</span>${o.das ? `<span>Zone <b>${o.def.zs}</b> · ${o.das.ordered ? 'ordre de fermeture actif' : 'pas d\'ordre'}</span>` : ''}`;
       const items = () => {
         const a = [];
         if (o.wedged) a.push({ label: '✋ Retirer la cale', cls: 'ok', run: () => s.wedgeDoor(id, false) });
         if (o.das && o.das.state === 'PS' && !o.das.ordered) a.push({ label: '🔧 Réarmer : replaquer la porte sur sa ventouse', run: () => s.localResetDas(o.das.id) });
         else if (!o.burnt) a.push({ label: o.open ? 'Fermer la porte' : 'Ouvrir la porte', run: () => s.toggleDoor(id) });
+        a.push({ label: '🧑‍🚒 Envoyer un agent vérifier', run: () => { const res = s.checkDoor(id); return res.ok ? { ok: true, msg: 'Agent en route : compte rendu dans ' + res.eta + ' s.' } : res; } });
         if (this.trainer && kind === 'cf_auto' && !o.wedged) { a.push({ sep: true }); a.push({ label: 'Caler la porte ouverte', cls: 'danger', run: () => s.wedgeDoor(id, true) }); }
         return a;
       };
@@ -326,6 +380,7 @@
         return;
       }
       const f = s.fans[id];
+      if (this.isHidden()) { this.openMenu(ev, f.def.name, '<span>En toiture : état inconnu depuis le poste. Regarde les voyants du CMSI.</span>', [{ label: 'Envoyer un technicien est hors exercice', disabled: true }], 'FAN'); return; }
       const items = () => {
         const a = [];
         if (this.trainer) a.push(f.fault ? { label: 'Réparer le ventilateur', run: () => s.setFault('fan', id, null) } : { label: 'Mettre en panne', cls: 'danger', run: () => s.setFault('fan', id, 'panne') });
@@ -339,6 +394,15 @@
     agentReport(d) {
       const s = this.sim;
       const box = $('#modal'), mb = box.querySelector('.modal-box');
+      if (d.patrol) {
+        mb.className = 'modal-box report ' + (d.fire ? 'fire' : 'calm');
+        mb.innerHTML = `<p class="rep-from">Radio — agent en ronde</p><h3>${esc(d.lines && d.lines.length > 1 ? 'Compte rendu ' + (d.level !== undefined ? s.b.levels[d.level].name : '') : d.msg)}</h3>
+          ${d.lines && d.lines.length > 1 ? '<ul>' + d.lines.map(l => '<li>' + esc(l) + '</li>').join('') + '</ul>' : (d.lines && d.lines.length ? '' : '<p>Rien d\'anormal.</p>')}
+          <div class="rep-actions"><button data-r="close" class="ghost">Fermer</button></div>`;
+        box.hidden = false;
+        mb.onclick = e => { if (e.target.closest('[data-r]')) box.hidden = true; };
+        return;
+      }
       mb.className = 'modal-box report ' + (d.fire ? 'fire' : 'calm');
       mb.innerHTML = `<p class="rep-from">Radio — agent de sécurité</p><h3>${esc(d.msg)}</h3>
         <div class="rep-actions">
@@ -390,6 +454,8 @@
       if (!this.mission) { card.hidden = true; return; }
       const m = this.mission;
       card.hidden = false;
+      card.classList.remove('cds');
+      card.onclick = null;
       card.innerHTML = `<button class="mc-toggle" data-mc aria-expanded="true"><b>${esc(m.title)}</b><span data-mcount></span></button>
         <ol class="mc-list">${m.objectives.map((o, i) => `<li data-oi="${i}">${esc(o.text)}</li>`).join('')}</ol>`;
       card.querySelector('[data-mc]').onclick = () => card.classList.toggle('collapsed');
@@ -418,19 +484,21 @@
         ['Première alarme feu', Object.values(s.zd).map(z => z.first).filter(x => x !== null)[0] ?? (F.dmPressed ?? F.ag)],
         ['Levée de doute lancée', F.agentSent], ['Secours appelés', F.called18], ['Alarme générale', F.ag], ['Arrivée des secours', F.firemenOnSite], ['Feu éteint', F.fireOut]
       ].filter(k => k[1] !== undefined && k[1] !== null);
+      if (this.student && !this.revealed) this.reveal(true);
       const box = $('#modal'), mb = box.querySelector('.modal-box');
       mb.className = 'modal-box debrief';
       mb.innerHTML = `<p class="rep-from">Bilan de mission</p><h3>${esc(m.title)} — ${ok} / ${tot} objectifs</h3>
         <div class="occ-sum"><div><b>${st.evac}</b><span>évacués</span></div><div><b>${st.inside}</b><span>encore dedans</span></div><div class="${st.danger ? 'bad' : ''}"><b>${st.danger}</b><span>en atmosphère enfumée</span></div><div><b>${fmt(s.t)}</b><span>durée</span></div></div>
         <div class="deb-cols"><div><h4>Objectifs</h4><ul class="deb-obj">${m.objectives.map((o, i) => `<li class="${i in m.done ? 'done' : i in m.failed ? 'failed' : 'miss'}">${esc(o.text)}${i in m.done ? ' <time>' + fmt(m.done[i]) + '</time>' : ''}</li>`).join('')}</ul></div>
         <div><h4>Chronologie</h4><ul class="deb-time">${key.map(k => `<li><time>${fmt(k[1])}</time>${k[0]}</li>`).join('')}</ul></div></div>
+        ${this.student ? this.readingHtml() : ''}
         <h4>À retenir</h4><ul>${m.lessons.map(l => '<li>' + esc(l) + '</li>').join('')}</ul>
         <div class="rep-actions"><button data-d="again">Rejouer la mission</button><button data-d="free" class="ghost">Continuer en mode libre</button><button data-d="home" class="ghost">Autres bâtiments</button></div>`;
       box.hidden = false;
       mb.onclick = e => {
         const b = e.target.closest('[data-d]'); if (!b) return;
         box.hidden = true;
-        if (b.dataset.d === 'again') this.start(s.b.id, this.missionId);
+        if (b.dataset.d === 'again') this.start(s.b.id, this.missionId, this.startOpts);
         if (b.dataset.d === 'free') { this.ended = false; this.mission = null; s.mission = null; $('#mission').hidden = true; }
         if (b.dataset.d === 'home') this.home();
       };
@@ -442,6 +510,9 @@
       const sw = (k, label, on, hint) => `<label class="sw"><input type="checkbox" data-tr="${k}" ${on ? 'checked' : ''}><span>${label}${hint ? '<small>' + hint + '</small>' : ''}</span></label>`;
       t.innerHTML = `<h3>Mode formateur</h3>
         <p class="note">Clique sur un équipement du bâtiment pour le mettre en panne, caler une porte, encrasser un détecteur… Tu peux aussi allumer un feu pendant une mission.</p>
+        <h4>Incident surprise</h4>
+        <div class="tr-btns"><button data-surprise="feu">🎲 Feu au hasard</button><button data-surprise="fausse">🎲 Fausse alarme</button><button data-surprise="calee">🎲 Feu + porte calée</button></div>
+        <p class="note">Il démarre dans 20 à 90 secondes simulées, dans un local tiré au sort. Idéal en vue élève.</p>
         <h4>Alimentations</h4>
         ${sw('secteur', 'Coupure secteur', !s.power.secteur, 'ECS et CMSI passent sur batterie')}
         ${sw('aes', 'Coupure de l\'alimentation de sécurité', !s.power.aes, 'Combinée au secteur : sécurité positive')}
@@ -458,14 +529,241 @@
         else if (k === 'vr') s.setFault('veilleRestreinte', null, v);
         else if (k.startsWith('zs:')) s.setFault('zs_hs', k.slice(3), v);
       };
-      t.onclick = e => { if (e.target.closest('[data-trclose]')) this.toggleTrainer(false); };
+      t.onclick = e => {
+        if (e.target.closest('[data-trclose]')) this.toggleTrainer(false);
+        const sp = e.target.closest('[data-surprise]');
+        if (sp) { this.surprise(sp.dataset.surprise); this.toast('Incident programmé. Bonne chance !', 'ok'); }
+      };
     },
     toggleTrainer(v) {
       this.trainer = v === undefined ? !this.trainer : v;
       $('#trainer').hidden = !this.trainer;
       $('[data-tb="trainer"]').classList.toggle('on', this.trainer);
       document.body.classList.toggle('trainer-on', this.trainer);
+      if (this.plan) this.plan.showFaults = this.trainer;
       if (this.trainer) this.renderTrainer();
+    },
+
+    /* ----------------------------- VUE ÉLÈVE ------------------------- */
+    isHidden() { return this.student && !this.revealed; },
+
+    applyStudentDrawer() {
+      const box = $('[data-body="explain"]');
+      box.classList.toggle('locked', this.isHidden());
+      // journal reconstruit sans les événements invisibles depuis le poste
+      const log = $('[data-body="log"]');
+      log.innerHTML = '';
+      (this.sim.log || []).forEach(e => { if (!(e.secret && this.isHidden())) this.addLog(e); });
+    },
+
+    roomMenuStudent(id, ev) {
+      const s = this.sim, r = s.rooms[id];
+      const marks = [['🔥', 'Foyer supposé'], ['💨', 'Fumée supposée'], ['🧍', 'Personnes à secourir'], ['⚠️', 'Anomalie / à vérifier']];
+      const items = [
+        { label: '🧑‍🚒 Envoyer un agent (levée de doute)', hint: 'Il rend compte par radio', run: () => { const res = s.sendAgent(id); return res.ok ? { ok: true, msg: 'Agent en route : arrivée dans ' + res.eta + ' s.' } : res; } },
+        { label: '🔦 Ronde du niveau ' + s.b.levels[r.level].name, hint: 'Fumée, portes, personnes bloquées', run: () => { const res = s.patrol(r.level); return res.ok ? { ok: true, msg: 'Ronde lancée : compte rendu dans ' + res.eta + ' s.' } : res; } }
+      ];
+      if (s.agent && s.agent.done && s.agent.room === id && s.agent.fire && !s.agent.noEntry) items.push({ label: '🧯 Attaquer à l\'extincteur', run: () => s.agentExtinguisher() });
+      items.push({ sep: true });
+      marks.forEach(([m, l]) => items.push({ label: m + ' Marquer : ' + l, cls: this.marks[id] === m ? 'ok' : '', run: () => { this.marks[id] = m; s.journal('Annotation : ' + l + ' — ' + s.roomName(id), 'info'); } }));
+      if (this.marks[id]) items.push({ label: '✕ Effacer l\'annotation', run: () => { delete this.marks[id]; } });
+      if (this.trainer) {
+        items.push({ sep: true });
+        items.push({ label: '🔥 Allumer un feu ici (formateur)', disabled: !!r.fire || r.def.kind === 'stair', run: () => s.ignite(id) });
+      }
+      this.openMenu(ev, s.roomName(id), `<span>${r.def.zd ? 'Zone de détection <b>' + r.def.zd + '</b>' : 'Pas de zone de détection'}</span><span>Vue élève : tu ne vois pas ce qui se passe dans ce local</span>`, items, null);
+    },
+
+    showStudentBrief() {
+      const box = $('#modal'), mb = box.querySelector('.modal-box');
+      mb.className = 'modal-box brief';
+      mb.innerHTML = `<p class="rep-from">Vue élève · SSIAP 2</p><h3>Tu es chef d'équipe au poste de sécurité</h3>
+        <p>Le plan est vierge : tu ne vois ni le feu, ni la fumée, ni les portes. Comme en vrai, tu dois comprendre la situation à partir de la façade du SSI, du plan des zones et des comptes rendus radio de tes agents.</p>
+        <ul><li>Clique sur un local pour envoyer un agent, lancer une ronde ou annoter le plan (foyer supposé, fumée, personnes…).</li>
+        <li>Le fil « Comprendre » est verrouillé jusqu'à la fin. Le bouton <b>👁 Révéler</b> compare ta lecture à la réalité.</li></ul>
+        <div class="rep-actions"><button data-s="surprise" class="danger">Tirer un incident surprise</button><button data-s="trainer" class="ghost">Le formateur crée l'incident</button></div>`;
+      box.hidden = false;
+      mb.onclick = e => {
+        const b = e.target.closest('[data-s]'); if (!b) return;
+        box.hidden = true; this.paused = false; this.sound.unlock();
+        if (b.dataset.s === 'surprise') this.surprise(['feu', 'feu', 'fausse', 'calee'][Math.floor(Math.random() * 4)]);
+        else this.toggleTrainer(true);
+      };
+    },
+
+    surprise(kind) {
+      const s = this.sim;
+      const rooms = Object.values(s.rooms).filter(r => r.def.kind === 'local' || r.def.kind === 'tech');
+      const r = rooms[Math.floor(Math.random() * rooms.length)];
+      const delay = 20 + Math.random() * 70;
+      const dis = Object.values(s.devices).filter(d => d.def.type === 'DI' && !d.def.sdad);
+      if (kind === 'fausse' && dis.length) {
+        const d = dis[Math.floor(Math.random() * dis.length)];
+        this.incident = 'Fausse alarme : détecteur ' + d.def.id + ' encrassé (' + s.roomName(d.def.room) + ')';
+        this.truth = { fire: [], falseDi: d.def.room };
+        this.pending.push({ t: s.t + delay, run: () => { d.fault = 'encrasse'; } });
+        return;
+      }
+      const open = Math.random() < 0.6;
+      this.incident = 'Feu dans ' + s.roomName(r.def.id) + (open ? ', porte laissée ouverte' : ', porte fermée');
+      this.truth = { fire: [r.def.id] };
+      this.pending.push({ t: s.t + delay, run: () => {
+        s.ignite(r.def.id);
+        Object.values(s.openings).forEach(o => { if ((o.def.a === r.def.id || o.def.b === r.def.id) && o.def.kind === 'door' && open) o.open = true; });
+      } });
+      if (kind === 'calee') {
+        const doors = Object.values(s.openings).filter(o => o.def.kind === 'cf_auto' && s.levelOf[o.def.a] === s.rooms[r.def.id].level);
+        const all = doors.length ? doors : Object.values(s.openings).filter(o => o.def.kind === 'cf_auto');
+        if (all.length) { const o = all[Math.floor(Math.random() * all.length)]; s.wedgeDoor(o.def.id, true, true); this.incident += ' — porte coupe-feu ' + o.def.id + ' calée'; this.truth.wedged = o.def.id; }
+      }
+    },
+
+    readingHtml() {
+      const s = this.sim;
+      const fires = Object.values(s.rooms).filter(r => r.fire).map(r => r.def.id);
+      const origin = this.truth && this.truth.fire && this.truth.fire.length ? this.truth.fire : fires.slice(0, 1);
+      const marked = Object.keys(this.marks).filter(k => this.marks[k] === '🔥');
+      const okFoyer = origin.length ? marked.some(m => origin.includes(m)) : marked.length === 0;
+      const smoky = Object.values(s.rooms).filter(r => r.s > 0.3).map(r => r.def.id);
+      const markedSmoke = Object.keys(this.marks).filter(k => this.marks[k] === '💨' || this.marks[k] === '🔥');
+      const smokeHit = smoky.filter(id => markedSmoke.includes(id)).length;
+      return `<h4>Ta lecture de la situation</h4><ul class="deb-obj">
+        <li class="${okFoyer ? 'done' : 'failed'}">Foyer : ${origin.length ? 'réel → ' + origin.map(id => esc(s.roomName(id))).join(', ') : 'aucun feu réel'} · marqué → ${marked.length ? marked.map(id => esc(s.roomName(id))).join(', ') : 'rien'}</li>
+        <li class="${smoky.length && smokeHit / smoky.length >= 0.5 ? 'done' : smoky.length ? 'miss' : 'done'}">Volumes enfumés repérés : ${smokeHit} / ${smoky.length}</li>
+        ${this.incident ? '<li class="miss">Incident tiré : ' + esc(this.incident) + '</li>' : ''}
+      </ul>`;
+    },
+
+    revealDialog() {
+      const s = this.sim, st = s.stats();
+      const box = $('#modal'), mb = box.querySelector('.modal-box');
+      mb.className = 'modal-box debrief';
+      mb.innerHTML = `<p class="rep-from">Vue élève</p><h3>Révéler le bâtiment</h3>
+        ${this.readingHtml()}
+        <div class="occ-sum"><div><b>${st.evac}</b><span>évacués</span></div><div><b>${st.inside}</b><span>encore dedans</span></div><div class="${st.danger ? 'bad' : ''}"><b>${st.danger}</b><span>en atmosphère enfumée</span></div></div>
+        <p class="note">Le plan réel s'affiche, le fil « Comprendre » se déverrouille. Tu peux revenir en vue élève avec le même bouton.</p>
+        <div class="rep-actions"><button data-v="show">Afficher le bâtiment réel</button><button data-v="cancel" class="ghost">Continuer en vue élève</button></div>`;
+      box.hidden = false;
+      mb.onclick = e => {
+        const b = e.target.closest('[data-v]'); if (!b) return;
+        box.hidden = true;
+        if (b.dataset.v === 'show') this.reveal();
+      };
+    },
+    reveal() {
+      this.revealed = true;
+      this.plan.hidden = false;
+      $('[data-tb="reveal"]').textContent = '🙈 Vue élève';
+      this.applyStudentDrawer();
+    },
+    hideAgain() {
+      this.revealed = false;
+      this.plan.hidden = true;
+      $('[data-tb="reveal"]').textContent = '👁 Révéler';
+      this.applyStudentDrawer();
+    },
+
+    /* --------------------- ESSAIS EN COMMISSION DE SÉCURITÉ ------------ */
+    showCdsBrief() {
+      const s = this.sim, c = this.cds;
+      const box = $('#modal'), mb = box.querySelector('.modal-box');
+      mb.className = 'modal-box brief';
+      mb.innerHTML = `<p class="rep-from">Visite périodique · ${esc(s.b.type)}</p><h3>Essais du SSI en commission de sécurité</h3>
+        <p>Tu es le préventionniste de la commission. L'exploitant et son technicien sont là : tu <b>fais procéder</b> aux essais, tu observes, tu notes.</p>
+        <p>Le SSI cache peut-être des anomalies… ou aucune. Pour chaque essai de la fiche, coche <b>Conforme</b> ou <b>Non conforme</b>, puis rends ton avis.</p>
+        <h4>Fiche d'essais (${c.items.length} points)</h4><ol>${c.items.map(i => '<li>' + esc(i.title) + '</li>').join('')}</ol>
+        <p class="note">Les commandes de niveau 2 demandent la clé. Les essais se font comme en vrai : clic sur un détecteur, un déclencheur, une porte, une commande du tableau…</p>
+        <button class="go-big" data-go>Commencer la visite</button>`;
+      box.hidden = false;
+      mb.onclick = e => { if (e.target.closest('[data-go]')) { box.hidden = true; this.paused = false; this.sound.unlock(); } };
+    },
+    renderCds() {
+      const c = this.cds, card = $('#mission');
+      card.hidden = false;
+      card.classList.add('cds');
+      card.innerHTML = `<button class="mc-toggle" data-mc><b>Fiche d'essais — commission</b><span data-cdscount></span></button>
+        <div class="cds-body">
+          <ol class="cds-list">${c.items.map(i => `<li data-ci="${i.id}"><div class="cds-t"><b>${esc(i.title)}</b><span class="cds-done" data-cdone></span></div>
+            <p class="cds-how">${esc(i.how)}</p><p class="cds-see"><i>Attendu :</i> ${esc(i.see)}</p>
+            <div class="cds-btns"><button data-mark="c">Conforme</button><button data-mark="nc">Non conforme</button></div></li>`).join('')}</ol>
+          ${this.sim.b.category !== 'E' ? '<button class="cds-power" data-cpower>⚡ Faire couper le secteur</button>' : ''}
+          <button class="go-big cds-avis" data-cavis>Rendre l'avis</button>
+        </div>`;
+      card.querySelector('[data-mc]').onclick = () => card.classList.toggle('collapsed');
+      card.onclick = e => {
+        const m = e.target.closest('[data-mark]');
+        if (m) {
+          const id = m.closest('[data-ci]').dataset.ci;
+          c.marks[id] = c.marks[id] === m.dataset.mark ? undefined : m.dataset.mark;
+          this.updateCds(true);
+          return;
+        }
+        if (e.target.closest('[data-cpower]')) {
+          const on = this.sim.power.secteur;
+          this.sim.setFault('secteur', null, on);
+          e.target.closest('[data-cpower]').textContent = on ? '⚡ Faire rétablir le secteur' : '⚡ Faire couper le secteur';
+          return;
+        }
+        if (e.target.closest('[data-cavis]')) this.cdsAvis();
+      };
+    },
+    updateCds() {
+      const c = this.cds, s = this.sim;
+      let n = 0;
+      c.items.forEach(i => {
+        const li = $(`[data-ci="${i.id}"]`); if (!li) return;
+        const done = i.done(s);
+        li.querySelector('[data-cdone]').textContent = done ? 'essai réalisé' : '';
+        li.classList.toggle('m-c', c.marks[i.id] === 'c');
+        li.classList.toggle('m-nc', c.marks[i.id] === 'nc');
+        if (c.marks[i.id]) n++;
+      });
+      const cnt = $('[data-cdscount]');
+      if (cnt) cnt.textContent = n + ' / ' + c.items.length;
+    },
+    cdsAvis() {
+      const c = this.cds;
+      const missing = c.items.filter(i => !c.marks[i.id]).length;
+      const box = $('#modal'), mb = box.querySelector('.modal-box');
+      mb.className = 'modal-box brief';
+      mb.innerHTML = `<p class="rep-from">Commission de sécurité</p><h3>Ton avis sur le SSI</h3>
+        ${missing ? `<p class="bad">${missing} point(s) de la fiche ne sont pas renseignés.</p>` : ''}
+        <p>Au vu des essais, quel avis proposes-tu pour la partie SSI ?</p>
+        <div class="rep-actions"><button data-a="favorable" class="ok-btn">Avis favorable</button><button data-a="défavorable" class="danger">Avis défavorable</button><button data-a="back" class="ghost">Continuer les essais</button></div>`;
+      box.hidden = false;
+      mb.onclick = e => {
+        const b = e.target.closest('[data-a]'); if (!b) return;
+        box.hidden = true;
+        if (b.dataset.a === 'back') return;
+        c.avis = b.dataset.a;
+        this.cdsBilan();
+      };
+    },
+    cdsBilan() {
+      const c = this.cds, s = this.sim, ev = window.SSI_CDS.evaluate(c);
+      this.ended = true;
+      if (this.student && !this.revealed) this.reveal();
+      const nFound = ev.found.filter(a => a.found).length;
+      const box = $('#modal'), mb = box.querySelector('.modal-box');
+      mb.className = 'modal-box debrief';
+      mb.innerHTML = `<p class="rep-from">Bilan des essais</p><h3>${c.anomalies.length ? nFound + ' anomalie(s) trouvée(s) sur ' + c.anomalies.length : 'Aucune anomalie n\'était cachée'}</h3>
+        <div class="occ-sum"><div class="${ev.avisOk ? '' : 'bad'}"><b>${ev.avisOk ? '✓' : '✗'}</b><span>avis ${esc(c.avis)} (attendu : ${ev.expected})</span></div><div><b>${ev.falseNc.length}</b><span>non-conformité(s) sans fondement</span></div><div><b>${ev.notDone.length}</b><span>point(s) non renseigné(s)</span></div><div><b>${fmt(s.t)}</b><span>durée de la visite</span></div></div>
+        <h4>Anomalies cachées</h4>
+        <ul class="deb-obj">${ev.found.length ? ev.found.map(a => `<li class="${a.found ? 'done' : 'failed'}">${esc(a.text)} <small>${a.major ? '— motive un avis défavorable' : '— observation'}</small></li>`).join('') : '<li class="done">Aucune : le SSI était conforme.</li>'}</ul>
+        ${ev.falseNc.length ? '<h4>Non-conformités relevées à tort</h4><ul>' + ev.falseNc.map(i => '<li>' + esc(i.title) + '</li>').join('') + '</ul>' : ''}
+        <h4>À retenir</h4><ul>
+          <li>La commission fait procéder aux essais, elle ne les réalise pas elle-même.</li>
+          <li>Commence toujours par l'état de veille : un voyant jaune allumé avant l'essai est déjà une information.</li>
+          <li>Le tableau ne voit pas tout : une porte calée ou un diffuseur muet ne se découvrent que sur le terrain.</li>
+        </ul>
+        <div class="rep-actions"><button data-d="again">Nouvelle visite (autres anomalies)</button><button data-d="home" class="ghost">Autres bâtiments</button></div>`;
+      box.hidden = false;
+      mb.onclick = e => {
+        const b = e.target.closest('[data-d]'); if (!b) return;
+        box.hidden = true;
+        if (b.dataset.d === 'again') this.start(s.b.id, null, { cds: true });
+        if (b.dataset.d === 'home') this.home();
+      };
     },
 
     /* ------------------------------ DIVERS --------------------------- */
@@ -488,9 +786,12 @@
           if (k === 'call') this.sim.callFiremen();
           if (k === 'sound') { this.sound.muted = !this.sound.muted; tb.textContent = this.sound.muted ? '🔇' : '🔊'; this.sound.unlock(); }
           if (k === 'trainer') this.toggleTrainer();
-          if (k === 'restart') this.start(this.sim.b.id, this.missionId);
+          if (k === 'restart') this.start(this.sim.b.id, this.missionId, this.startOpts);
+          if (k === 'reveal') { if (this.revealed) this.hideAgain(); else this.revealDialog(); }
           return;
         }
+        const zb = e.target.closest('[data-zonesbtn]');
+        if (zb) { zb.classList.toggle('on'); this.plan.setZones(zb.classList.contains('on')); return; }
         const sp = e.target.closest('[data-speed]');
         if (sp) { this.setSpeed(+sp.dataset.speed); this.sound.unlock(); return; }
         const tab = e.target.closest('[data-tab]');

@@ -69,7 +69,13 @@
           const name = el('text', { x: x + 4, y: y0 + 11, class: 'room-name' + (w < 70 ? ' tiny' : '') }, gTxt);
           name.textContent = r.kind === 'stair' ? 'Escalier' : w < 70 ? r.name.replace('Ch. ', '') : r.name;
           const occ = el('text', { x: x + w - 4, y: y0 + hh - 5, class: 'occ', 'text-anchor': 'end' }, gTxt);
-          this.roomEls[r.id] = { grp, smoke, heat, fire, flame: fire.firstChild, occ, cx, cy, w, hh };
+          if (r.zd) {
+            el('rect', { x: x + 1.5, y: y0 + 1.5, width: w - 3, height: hh - 3, class: 'zone-tint', fill: this.zoneColor(r.zd) }, gRooms).style.pointerEvents = 'none';
+            const zl = el('text', { x: x + 4, y: y0 + hh - 5, class: 'zone-label' }, gTxt);
+            zl.textContent = r.zd;
+          }
+          const mark = el('text', { x: x + w / 2, y: y0 + hh / 2 + 9, class: 'mark', 'text-anchor': 'middle' }, gTxt);
+          this.roomEls[r.id] = { grp, smoke, heat, fire, flame: fire.firstChild, occ, cx, cy, w, hh, mark };
           grp.addEventListener('click', ev => this.h.onRoom(r.id, ev));
         });
         // ouvertures
@@ -175,6 +181,10 @@
           el('circle', { r: 7, class: 'body' }, grp);
           el('path', { d: 'M-5,-5 L5,5 M-5,5 L5,-5', class: 'cross' }, grp);
           break;
+        case 'BAASMA':
+          el('rect', { x: -7, y: -6, width: 14, height: 12, rx: 2, class: 'body' }, grp);
+          el('text', { y: 3, class: 'sym', 'text-anchor': 'middle' }, grp).textContent = 'Ma';
+          break;
         case 'DCM':
           el('rect', { x: -7, y: -6, width: 14, height: 12, rx: 1.5, class: 'body' }, grp);
           el('text', { y: 3.4, class: 'sym', 'text-anchor': 'middle' }, grp).textContent = 'D';
@@ -186,10 +196,21 @@
     }
 
     /* ------------------------------------------------------------------ */
+    zoneColor(zd) {
+      const pal = ['#2f80c8', '#c8102e', '#12924a', '#b68600', '#7b3fb2', '#0f8a8a', '#d1497c', '#5a6b7a', '#e07a00', '#3f5bd1', '#6c8f1a', '#a0522d'];
+      const ids = this.sim.b.zd.map(z => z.id);
+      const i = ids.indexOf(zd);
+      return pal[(i < 0 ? 0 : i) % pal.length];
+    }
+    setZones(on) { this.svg.classList.toggle('zones-on', on); }
+
     update(blink) {
+      if (this.hidden) return this.updateHidden();
+      this.svg.classList.remove('hidden-view');
       const s = this.sim;
       Object.entries(this.roomEls).forEach(([id, e]) => {
         const r = s.rooms[id];
+        e.mark.textContent = this.marks && this.marks[id] ? this.marks[id] : '';
         const sm = r.s < 0.01 ? 0 : 0.1 + r.s * 0.78;
         e.smoke.setAttribute('opacity', sm.toFixed(3));
         e.heat.setAttribute('opacity', clampN((r.T - 60) / 900, 0, 0.55).toFixed(3));
@@ -223,7 +244,7 @@
           if (e.kind === 'fan') {
             const f = s.fans[rid];
             e.grp.classList.toggle('run', f.run);
-            e.grp.classList.toggle('fault', !!f.fault);
+            e.grp.classList.toggle('fault', !!f.fault && this.showFaults);
             e.st.textContent = f.fault ? 'EN PANNE' : f.pompier ? 'Arrêt pompiers' : f.run ? 'En marche' : 'À l\'arrêt';
           } else {
             const on = s.cta.on && s.power.secteur;
@@ -237,16 +258,17 @@
         if (d.def.type === 'DI') {
           g.classList.toggle('alarm', d.state === 'alarme');
           g.classList.toggle('blinkon', d.state === 'alarme' && blink);
-          g.classList.toggle('faulty', !!d.fault);
-        } else if (d.def.type === 'DM' || d.def.type === 'DCM') {
+          g.classList.toggle('faulty', !!d.fault && this.showFaults);
+        } else if (d.def.type === 'DM' || d.def.type === 'DCM' || d.def.type === 'BAASMA') {
           g.classList.toggle('pressed', d.state === 'actionne');
           g.classList.toggle('blinkon', d.state === 'actionne' && blink);
         } else if (d.def.type === 'DS') {
-          g.classList.toggle('active', s.uga.state === 'ag');
+          g.classList.toggle('active', s.uga.state === 'ag' && !d.fault);
+          g.classList.toggle('faulty', !!d.fault && this.showFaults);
         } else if (d.das) {
           g.classList.toggle('ps', d.das.state === 'PS');
           g.classList.toggle('tr', d.das.state === 'TR');
-          g.classList.toggle('faulty', !!d.das.fault);
+          g.classList.toggle('faulty', !!d.das.fault && this.showFaults);
           const fan = d.def.mode === 'meca' && Object.values(s.fans).some(f => f.run && f.def.zfs.includes(d.def.zs) && (f.def.role === 'extraction') === (d.def.type === 'VD'));
           g.classList.toggle('flowing', d.das.state === 'PS' && (d.def.mode !== 'meca' || fan));
         }
@@ -260,6 +282,32 @@
         this.agentEl.setAttribute('x', PAD + p.x - 8);
         this.agentEl.setAttribute('y', this.levelY[li] + p.y + 6);
         this.agentEl.setAttribute('opacity', 1);
+      } else this.agentEl.setAttribute('opacity', 0);
+      this.firemenEl.setAttribute('opacity', s.firemen.onSite ? 1 : 0);
+    }
+
+    updateHidden() {
+      const s = this.sim;
+      this.svg.classList.add('hidden-view');
+      Object.entries(this.roomEls).forEach(([id, e]) => {
+        e.smoke.setAttribute('opacity', 0); e.heat.setAttribute('opacity', 0); e.fire.setAttribute('opacity', 0);
+        e.occ.textContent = ''; e.grp.classList.remove('alarm');
+        e.mark.textContent = this.marks && this.marks[id] ? this.marks[id] : '';
+      });
+      Object.values(this.openEls).forEach(e => {
+        e.closed.style.display = 'none'; e.leaf.style.display = 'none';
+        e.grp.classList.remove('is-open', 'wedged', 'burnt', 'transit');
+        e.icon.textContent = '';
+      });
+      Object.entries(this.devEls).forEach(([id, e]) => {
+        e.grp.classList.remove('alarm', 'blinkon', 'faulty', 'pressed', 'active', 'ps', 'tr', 'flowing', 'run', 'fault');
+        if (e.st) e.st.textContent = '?';
+      });
+      const a = s.agent;
+      if (a && (!a.done || s.t - a.eta < 90)) {
+        const r = this.roomEls[a.room], li = s.rooms[a.room].level;
+        const p = a.done ? { x: r.cx, y: r.cy } : { x: 30, y: s.b.levels[li].h * K - 20 };
+        this.agentEl.setAttribute('x', PAD + p.x - 8); this.agentEl.setAttribute('y', this.levelY[li] + p.y + 6); this.agentEl.setAttribute('opacity', 1);
       } else this.agentEl.setAttribute('opacity', 0);
       this.firemenEl.setAttribute('opacity', s.firemen.onSite ? 1 : 0);
     }

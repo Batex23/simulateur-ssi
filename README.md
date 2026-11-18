@@ -10,9 +10,18 @@ Simulateur pédagogique de système de sécurité incendie, pour la formation de
 
 | Bâtiment | SSI | Ce qu'on y apprend |
 |---|---|---|
+| Salle polyvalente des Pins (type L, plain-pied) | Catégorie E, EA 3 | BAAS Ma, DCM local, exutoires — aucun tableau |
+| Le Comptoir des Chartrons (type N, R+1) | Catégorie D, EA 2b | BAAS Pr / Sa, DCMR, aucune mise en sécurité automatique |
 | Collège Jean Moulin (type R, R+1) | Catégorie C, EA 2a | Alarme sur DM, DAD autonomes, désenfumage naturel **manuel** |
+| Médiathèque Montaigne (type S, R+1) | Catégorie B, EA 2a | CMSI de type B, zones de DM, désenfumage à l'UCMC |
 | Hôtel des Quais (type O, R+2) | Catégorie A, EA 1 | ECS / CMSI, temporisation, levée de doute, désenfumage naturel automatique |
 | Tour Garonne (type W, R+3) | Catégorie A, EA 1 | Désenfumage **mécanique**, arrêt pompiers, CTA et clapets, UGCIS |
+
+## Trois façons de jouer
+
+- **Mode libre** : on manipule tout et on observe.
+- **Essais en commission de sécurité** : des anomalies sont tirées au sort et cachées (porte calée, DAS bloqué, temporisation trop longue, diffuseurs muets, veille restreinte…). On fait procéder aux essais avec une fiche, on note conforme / non conforme, on rend un avis, puis le bilan révèle ce qui a été trouvé ou manqué.
+- **Vue élève SSIAP 2** (case à cocher sur l'accueil) : plan vierge, sans feu, sans fumée ni état des portes. On déduit la situation depuis la façade, le plan des zones, les levées de doute et les rondes, et on annote le plan. Le bouton « Révéler » compare cette lecture à la réalité.
 
 Six missions guidées avec objectifs et bilan, un mode libre et un **mode formateur** (pannes de DAS, porte calée, DI encrassé ou masqué, coupure secteur / AES, UGA en veille restreinte, zones hors service).
 

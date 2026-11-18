@@ -190,6 +190,52 @@ window.SSI_FICHES = {
     ],
     ref: 'DF 3 § 5, CH 41'
   },
+  CMSIB: {
+    t: 'CMSI de type B — signalisation des déclencheurs manuels',
+    role: 'Dans un SSI de catégorie B, les déclencheurs manuels sont reliés directement au CMSI, qui identifie la zone actionnée.',
+    pts: [
+      'Pas de détection automatique : seule une personne qui actionne un DM lance l\'alarme.',
+      'Le CMSI indique la zone de DM, commande le compartimentage et l\'alarme générale selon le tableau de correspondance.',
+      'Le désenfumage se commande à la main (UCMC du CMSI ou DCM sur place).'
+    ],
+    ref: 'NF S 61-934, NF S 61-931'
+  },
+  BAASPR: {
+    t: 'BAAS Pr — bloc autonome d\'alarme sonore principal',
+    role: 'Cœur d\'un équipement d\'alarme de type 2b : il reçoit les déclencheurs manuels et commande des BAAS satellites (Sa).',
+    pts: [
+      'Toute action sur un DM déclenche l\'alarme générale dans tout le bâtiment.',
+      'Il ne localise pas le déclencheur actionné.',
+      'Les BAAS fonctionnent sur leur propre batterie : autonomie de 5 minutes minimum en alarme.'
+    ],
+    ref: 'NF C 48-150, NF S 61-936'
+  },
+  DCMR: {
+    t: 'DCMR — Dispositif de commande manuelle regroupé',
+    role: 'Dans un SSI de catégorie D, il regroupe en un seul endroit les commandes manuelles des DAS (portes, désenfumage).',
+    pts: [
+      'Rien n\'est automatique : la mise en sécurité dépend de la personne qui l\'actionne.',
+      'Il est placé à un endroit connu du personnel, souvent près de l\'entrée principale.',
+      'Chaque commande reste active jusqu\'à son réarmement.'
+    ],
+    ref: 'NF S 61-938'
+  },
+  CATE: {
+    t: 'SSI de catégorie E',
+    role: 'Le système le plus simple : des dispositifs de commande manuelle (DCM) locaux et un équipement d\'alarme de type 3 ou 4.',
+    pts: [
+      'Aucun matériel central : chaque DCM commande sur place les DAS de sa zone.',
+      'Alarme : BAAS Ma (EA 3) ou tout dispositif sonore autonome — cloche, trompe, sifflet (EA 4).',
+      'Adapté aux petits établissements : tout repose sur l\'organisation et le personnel.'
+    ],
+    ref: 'NF S 61-931, MS 53'
+  },
+  BAASMA: {
+    t: 'BAAS Ma — bloc autonome d\'alarme sonore manuel',
+    role: 'Bloc d\'alarme qui se déclenche par son propre organe de commande, sans tableau.',
+    pts: ['Équipement d\'alarme de type 3.', 'On l\'actionne sur place, on l\'arrête avec sa clé.', 'Il fonctionne sur sa propre batterie.'],
+    ref: 'NF C 48-150'
+  },
   ZONES: {
     t: 'Les zones du SSI',
     role: 'Le bâtiment est découpé en volumes qui servent à détecter et à mettre en sécurité.',

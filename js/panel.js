@@ -23,21 +23,29 @@
       if (b.category === 'A') {
         cab.appendChild(this.buildECS());
         cab.appendChild(this.buildCMSI());
-      } else {
+      } else if (b.category === 'B') {
+        cab.appendChild(this.buildECS(true));
+        cab.appendChild(this.buildCMSI());
+      } else if (b.category === 'C') {
         cab.appendChild(this.buildUGA2());
         cab.appendChild(this.buildDCS());
+      } else if (b.category === 'D') {
+        cab.appendChild(this.buildUGA2('D'));
+        cab.appendChild(this.buildDCMR());
+      } else {
+        cab.appendChild(this.buildNone());
       }
-      cab.appendChild(this.buildKey());
+      if (b.category !== 'E') cab.appendChild(this.buildKey());
       this.root.appendChild(cab);
-      this.root.addEventListener('click', e => this.onClick(e));
+      this.root.onclick = e => this.onClick(e);
     }
 
     /* ---------------------------- ECS --------------------------------- */
-    buildECS() {
+    buildECS(catB) {
       const s = this.sim;
       const u = h('section', 'unit ecs');
       u.innerHTML = `
-        <header class="plate"><b>ECS</b><span>Équipement de contrôle et de signalisation · système de détection incendie</span><button class="info" data-fiche="ECS">?</button></header>
+        <header class="plate">${catB ? '<b>CMSI B</b><span>Signalisation des zones de déclencheurs manuels (intégrée au CMSI de type B)</span><button class="info" data-fiche="CMSIB">?</button>' : '<b>ECS</b><span>Équipement de contrôle et de signalisation · système de détection incendie</span><button class="info" data-fiche="ECS">?</button>'}</header>
         <div class="leds-row">
           ${led('green', 'Sous tension', 'ecs.tension')}
           ${led('red', 'Feu', 'ecs.feu')}
@@ -69,7 +77,7 @@
       const s = this.sim, b = s.b;
       const u = h('section', 'unit cmsi');
       u.innerHTML = `
-        <header class="plate"><b>CMSI</b><span>Centralisateur de mise en sécurité incendie · ${b.ea}</span><button class="info" data-fiche="CMSI">?</button></header>
+        <header class="plate"><b>CMSI</b><span>Centralisateur de mise en sécurité incendie${b.category === 'B' ? ' de type B' : ' de type A'} · ${b.ea}</span><button class="info" data-fiche="CMSI">?</button></header>
         <div class="leds-row">
           ${led('green', 'Sous tension', 'cmsi.tension')}
           ${led('yellow', 'Défaut alim.', 'cmsi.alim')}
@@ -128,17 +136,18 @@
     }
 
     /* ---------------------- CATÉGORIE C : UGA 2 + DCS ------------------- */
-    buildUGA2() {
+    buildUGA2(cat) {
       const u = h('section', 'unit ecs');
+      const D = cat === 'D';
       u.innerHTML = `
-        <header class="plate"><b>UGA 2</b><span>Unité de gestion d'alarme · équipement d'alarme ${this.sim.b.ea}</span><button class="info" data-fiche="UGA2">?</button></header>
+        <header class="plate">${D ? '<b>BAAS Pr</b><span>Bloc autonome d\'alarme sonore principal · équipement d\'alarme ' + this.sim.b.ea + '</span><button class="info" data-fiche="BAASPR">?</button>' : '<b>UGA 2</b><span>Unité de gestion d\'alarme · équipement d\'alarme ' + this.sim.b.ea + '</span><button class="info" data-fiche="UGA2">?</button>'}</header>
         <div class="leds-row">
           ${led('green', 'Sous tension', 'ecs.tension')}
           ${led('red', 'Alarme générale', 'uga.ag')}
           ${led('yellow', 'Arrêt alarme', 'uga.arret')}
           ${led('yellow', 'Dérangement', 'ecs.alim')}
         </div>
-        <p class="unit-note">L'UGA 2 reçoit les déclencheurs manuels et diffuse l'alarme générale. Elle n'indique pas quel déclencheur a été actionné.</p>
+        <p class="unit-note">${D ? 'Le BAAS Pr reçoit les déclencheurs manuels et commande les BAAS satellites (Sa) de tout le bâtiment. Il n\'indique pas quel déclencheur a été actionné.' : 'L\'UGA 2 reçoit les déclencheurs manuels et diffuse l\'alarme générale. Elle n\'indique pas quel déclencheur a été actionné.'}</p>
         <div class="keys">
           ${btn('Alarme générale', 'uga.ag', 1, 'cover red')}
           ${btn('Arrêt signal', 'uga.stopag', 2)}
@@ -159,6 +168,33 @@
         <div class="zs-table"><div class="zs-head"><span>Désenfumage (report)</span><span>PS</span><span></span><span></span><span></span></div>
           ${this.sim.b.zs.filter(z => z.kind === 'ZF').map(z => `<div class="zs-row"><span class="zs-name"><i class="zk ZF">désenf.</i><b>${z.id}</b> ${z.name}</span><span class="led yellow" data-zps="${z.id}"></span><span></span><span></span><span></span></div>`).join('')}
         </div>`;
+      return u;
+    }
+
+    buildDCMR() {
+      const s = this.sim;
+      const u = h('section', 'unit cmsi dcmr');
+      u.innerHTML = `
+        <header class="plate"><b>DCMR</b><span>Dispositif de commande manuelle regroupé · près de l'entrée</span><button class="info" data-fiche="DCMR">?</button></header>
+        <p class="unit-note">Aucune commande automatique : c'est toi qui décides de fermer les portes et d'ouvrir le désenfumage. Chaque commande reste enclenchée jusqu'au réarmement.</p>
+        <div class="zs-table"><div class="zs-head"><span>Fonction</span><span>Cmd</span><span></span><span></span><span>Commande</span></div>
+        ${s.b.zs.filter(z => z.kind !== 'ZA').map(z => `<div class="zs-row" data-zs="${z.id}"><span class="zs-name"><i class="zk ${z.kind}">${z.kind === 'ZC' ? 'compart.' : 'désenf.'}</i><b>${z.id}</b> ${z.name}</span>
+          <span class="led yellow" data-zps="${z.id}"></span><span></span><span></span>
+          <span class="zs-btns">${btn('Commande', 'zs.cmd:' + z.id, 1, 'cover red small')}${btn('Réarmer', 'zs.reset:' + z.id, 1, 'small')}</span></div>`).join('')}
+        </div>`;
+      return u;
+    }
+    buildNone() {
+      const u = h('section', 'unit none');
+      u.innerHTML = `
+        <header class="plate"><b>Catégorie E</b><span>Pas de matériel central</span><button class="info" data-fiche="CATE">?</button></header>
+        <p class="unit-note">Dans un SSI de catégorie E, il n'y a aucun tableau à surveiller. Tout se passe dans le bâtiment :</p>
+        <ul class="none-list">
+          <li><b>Alarme</b> — bloc autonome d'alarme sonore manuel (BAAS Ma), dans le hall et la grande salle. On l'actionne sur place, on l'arrête avec sa clé.</li>
+          <li><b>Désenfumage</b> — dispositif de commande manuelle (DCM à treuil) dans le hall : il ouvre les exutoires et l'amenée d'air de la grande salle.</li>
+          <li><b>Compartimentage</b> — portes à ferme-porte, toujours fermées : rien à commander.</li>
+        </ul>
+        <div class="none-state"><span class="led red" data-led-ag></span><span>Alarme en cours dans le bâtiment (indication pour la formation, pas sur le terrain)</span></div>`;
       return u;
     }
 
@@ -304,9 +340,12 @@
         const bt = root.querySelector(`[data-action="fan.pomp:${f.def.id}"] span`);
         if (bt) bt.textContent = f.pompier ? 'Remise en marche' : 'Arrêt pompiers';
       });
+      const nag = root.querySelector('[data-led-ag]');
+      if (nag) { nag.classList.toggle('on', s.uga.state === 'ag'); nag.classList.toggle('blink', s.uga.state === 'ag'); }
       const lv = root.querySelector('[data-keylevel]');
       if (lv) lv.textContent = 'Niveau ' + s.access;
-      root.querySelector('.key').classList.toggle('turned', s.access === 2);
+      const key = root.querySelector('.key');
+      if (key) key.classList.toggle('turned', s.access === 2);
       root.classList.toggle('lvl2', s.access === 2);
     }
   }

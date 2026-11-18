@@ -443,3 +443,79 @@ body.trainer-on .room:hover .room-base { fill: #fff3d1; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001s !important; animation-iteration-count: 1 !important; transition: none !important; }
 }
+
+/* ======================= MODES : ÉLÈVE, CDS, CATÉGORIES ================= */
+.modes { display: flex; flex-wrap: wrap; gap: 14px 30px; align-items: center; margin: -8px 0 18px; }
+.student-toggle { display: flex; gap: 10px; align-items: flex-start; background: var(--desk-2); border: 1px solid var(--desk-ln); border-left: 5px solid var(--safety); border-radius: var(--radius); padding: 10px 14px; max-width: 640px; cursor: pointer; }
+.student-toggle input { margin-top: 4px; accent-color: var(--safety); width: 18px; height: 18px; }
+.student-toggle span { color: var(--txt-2); }
+.student-toggle b { color: var(--txt); }
+.cats { margin: 0; color: var(--txt-2); }
+.cats b { color: var(--txt); }
+.go.cds { background: #fff8e0; border-color: #e6c35a; }
+.go.cds:hover { border-color: #9a7400; }
+.bcard.cat-B { border-top-color: #e07a00; }
+.bcard.cat-C { border-top-color: var(--evac); }
+.bcard.cat-D { border-top-color: var(--air); }
+.bcard.cat-E { border-top-color: #7b8791; }
+.cat-B .badge-cat { background: #e07a00; }
+.cat-D .badge-cat { background: var(--air); }
+.cat-E .badge-cat { background: #5a6b7a; }
+
+.tb-btn.reveal { background: var(--safety); color: var(--ink); border-color: var(--safety); font-weight: 700; }
+.zones-btn { border: 1px solid #b9c1c0; background: #fff; border-radius: 3px; padding: 2px 9px; font-weight: 600; }
+.zones-btn.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+/* plan des zones et annotations */
+.zone-tint { opacity: 0; transition: opacity .2s; }
+.zone-label { font: 800 10.5px var(--font); opacity: 0; pointer-events: none; fill: var(--ink); }
+.zones-on .zone-tint { opacity: .16; }
+.zones-on .zone-label { opacity: .85; }
+.mark { font-size: 20px; pointer-events: none; }
+.hidden-view .room-base { fill: #fbfbf8; }
+.hidden-view .k-circ .room-base, .hidden-view .k-hall .room-base { fill: #f6f3e8; }
+.hidden-view .opening .gap { stroke: #fff; }
+.hidden-view .opening.k-cf_auto .gap { stroke: #f2c1c8; stroke-width: 4; }
+.hidden-view .opening.k-exit .gap { stroke: #b6e2c6; stroke-width: 4; }
+.hidden-view .dev { opacity: .75; }
+body.student .room:hover .room-base { fill: #eef5fb; }
+
+/* fil Comprendre verrouillé */
+.tab-body.locked > * { display: none; }
+.tab-body.locked::before { content: "Vue élève : le fil « Comprendre » se débloque quand tu révèles le bâtiment. D'ici là, seules la façade, la radio et le journal du poste te renseignent."; display: block; padding: 14px 4px; color: #6b7782; font-size: 14.5px; max-width: 70ch; }
+
+/* fiche d'essais en commission */
+.mission-card.cds { width: min(400px, calc(100% - 28px)); max-height: calc(100% - 70px); display: flex; flex-direction: column; }
+.mission-card.cds .cds-body { overflow: auto; padding: 0 12px 12px; }
+.mission-card.cds.collapsed .cds-body { display: none; }
+.cds-list { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; }
+.cds-list li { padding: 6px 8px; border-radius: 4px; background: rgba(255,255,255,.05); border-left: 3px solid transparent; }
+.cds-list li.m-c { border-left-color: #35e06a; }
+.cds-list li.m-nc { border-left-color: var(--fire-hi); background: rgba(255,48,72,.12); }
+.cds-t { display: flex; justify-content: space-between; gap: 8px; }
+.cds-done { color: var(--safety); font-size: 12px; white-space: nowrap; }
+.cds-how, .cds-see { margin: 3px 0 0; color: var(--txt-2); }
+.cds-see i { font-style: normal; color: var(--txt); }
+.cds-btns { display: flex; gap: 6px; margin-top: 6px; }
+.cds-btns button { border: 1px solid var(--desk-ln); background: var(--desk-3); border-radius: 3px; padding: 3px 9px; font-size: 12.5px; }
+.m-c [data-mark="c"] { background: #1f7a43; border-color: #35e06a; }
+.m-nc [data-mark="nc"] { background: var(--fire); border-color: var(--fire-hi); }
+.cds-power { margin-top: 12px; width: 100%; border: 1px dashed var(--safety); background: none; color: var(--safety); border-radius: 4px; padding: 7px; }
+.cds-avis { width: 100%; }
+.ok-btn { background: var(--evac) !important; border-color: var(--evac) !important; }
+
+/* formateur : incidents surprise */
+.tr-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.tr-btns button { border: 1px solid #cdd3d2; background: #fff; border-radius: 4px; padding: 6px 9px; }
+.tr-btns button:hover { border-color: var(--ink); }
+
+/* catégorie E et DCMR */
+.none-list { margin: 6px 0; padding-left: 18px; font-size: 14px; }
+.none-list li { margin: 5px 0; }
+.none-state { display: flex; gap: 8px; align-items: center; font-size: 13px; color: #4b544c; margin-top: 10px; }
+.unit.none .plate b { background: #5a6b7a; color: #fff; }
+.unit.dcmr .plate b { background: var(--air); }
+.t-BAASMA .body { fill: #ff8a1f; stroke: #8a4300; }
+.t-BAASMA .sym { fill: #fff; font-size: 6.5px; }
+.t-BAASMA.pressed.blinkon .body { fill: #ffd23f; }
+.t-DS.faulty .body { stroke: #ff7a00; stroke-width: 2.4; }

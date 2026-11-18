@@ -34,6 +34,7 @@
     reset() {
       const b = this.b;
       this.t = 0; this.acc = 0;
+      this.tempo = b.tempo;
       this.access = 1;
       this.log = []; this.explains = []; this.flags = {}; this._once = {};
       this.power = { secteur: true, aes: true };
@@ -104,8 +105,8 @@
     /* ------------------------------------------------------------------ */
     /* journaux                                                           */
     /* ------------------------------------------------------------------ */
-    journal(text, kind = 'info') {
-      const e = { t: this.t, time: fmt(this.t), text, kind };
+    journal(text, kind = 'info', secret = false) {
+      const e = { t: this.t, time: fmt(this.t), text, kind, secret };
       this.log.push(e);
       this.emit('log', e);
     }
@@ -151,7 +152,7 @@
       const fuel = (r.def.fuel || (r.def.kind === 'circ' ? 60 : 400)) * r.def.w * r.def.h; // MJ
       r.fire = { Q: opts.Q || 5, t: opts.t || 0, E: 0, fuel, stage: 'croissance', alpha: opts.alpha || 0.0117 };
       if (!opts.silent) {
-        this.journal('Départ de feu : ' + this.roomName(roomId), 'fire');
+        this.journal('Départ de feu : ' + this.roomName(roomId), 'fire', true);
         this.explain('🔥 Un feu démarre dans ' + this.roomName(roomId) + '. Il grandit selon une courbe t² : lent au début, puis très rapide.', 'fire');
       }
       this.emit('fire', roomId);
@@ -176,7 +177,7 @@
         }
         if (f.stage === 'croissance' && ventil && f.Q >= 0.9 * Qmax && Qmax > 700 && r.T > 450) {
           f.stage = 'développé';
-          this.journal('Embrasement généralisé : ' + this.roomName(r.def.id), 'fire');
+          this.journal('Embrasement généralisé : ' + this.roomName(r.def.id), 'fire', true);
           this.explain('💥 Embrasement généralisé dans ' + this.roomName(r.def.id) + ' : tout le local brûle. Le feu peut maintenant passer dans les volumes voisins par les portes ouvertes.', 'fire');
         }
         if (!ventil && f.stage === 'croissance' && f.t > 120) {
@@ -208,9 +209,9 @@
             const limit = passage ? 60 : o.def.kind === 'cf_auto' ? 1800 : 720;
             if (!passage && o.exposure > limit * 0.8) this.explain('⏱ La porte entre ' + this.roomName(r.def.id) + ' et ' + this.roomName(other) + ' est exposée au feu depuis longtemps. Une porte coupe-feu tient un temps limité (ex. EI 30 = 30 min).', 'warn', 'expo_' + o.def.id);
             if (o.exposure > limit) {
-              if (!passage) { o.burnt = true; this.journal('Ruine de la porte ' + o.def.id, 'fire'); }
+              if (!passage) { o.burnt = true; this.journal('Ruine de la porte ' + o.def.id, 'fire', true); }
               this.ignite(other, { silent: true });
-              this.journal('Propagation du feu vers ' + this.roomName(other), 'fire');
+              this.journal('Propagation du feu vers ' + this.roomName(other), 'fire', true);
               this.explain('🔥 Le feu se propage vers ' + this.roomName(other) + (passage ? ' par une porte restée ouverte.' : ' : la porte a cédé.'), 'fire');
             }
           });
@@ -222,9 +223,12 @@
       const r = this.rooms[roomId];
       if (!r || !r.fire || r.fire.stage === 'éteint') return;
       r.fire.stage = 'éteint'; r.fire.Q = 0;
-      this.journal('Feu éteint : ' + this.roomName(roomId) + (how ? ' (' + how + ')' : ''), 'ok');
+      this.journal('Feu éteint : ' + this.roomName(roomId) + (how ? ' (' + how + ')' : ''), 'ok', how !== 'sapeurs-pompiers' && how !== 'extincteur');
       this.explain('✅ Feu éteint dans ' + this.roomName(roomId) + '. La fumée reste : il faudra désenfumer avant de pouvoir réarmer les détecteurs.', 'ok');
-      if (!Object.values(this.rooms).some(x => x.fire && x.fire.stage !== 'éteint')) this.flag('fireOut');
+      if (!Object.values(this.rooms).some(x => x.fire && x.fire.stage !== 'éteint')) {
+        this.flag('fireOut');
+        if (this.firemen.onSite) this.journal('Les sapeurs-pompiers annoncent : feu éteint', 'ok');
+      }
     }
 
     /* ----------------------------- FUMÉE ------------------------------ */
@@ -378,7 +382,7 @@
       d.state = 'alarme';
       if (d.def.sdad) {
         // détecteur autonome déclencheur : commande directe des DAS, pas d'alarme
-        this.journal('DAD autonome ' + d.def.id + ' sollicité → fermeture des portes', 'cmd');
+        this.journal('DAD autonome ' + d.def.id + ' sollicité → fermeture des portes', 'cmd', true);
         this.explain('🔴 Le détecteur autonome déclencheur (' + this.roomName(d.def.room) + ') a vu de la fumée. Il commande directement la fermeture des portes asservies. Il ne déclenche PAS l\'alarme : en catégorie C, ce sont les déclencheurs manuels qui le font.', 'detect');
         this.command(d.def.sdad, 'SDAD ' + d.def.id);
         return;
@@ -411,7 +415,8 @@
       this.ecs.buzzer = true; this.ecs.ack = false;
       if (isNew) {
         this.journal('ECS : FEU ' + zdId + ' (' + z.def.name + ') — ' + (srcType === 'DM' ? 'déclencheur manuel' : 'détecteur automatique'), 'fire');
-        this.explain('🔴 L\'ECS reçoit une alarme feu de la zone ' + zdId + ' « ' + z.def.name + ' » (' + (srcType === 'DM' ? 'déclencheur manuel actionné' : 'détecteur automatique') + '). Le buzzer d\'alarme restreinte sonne pour prévenir le personnel. L\'ECS transmet l\'information au CMSI.', 'detect');
+        if (this.b.category === 'B') this.explain('🔴 Le CMSI de type B reçoit l\'alarme de la zone de déclencheurs manuels ' + zdId + ' « ' + z.def.name + ' ». En catégorie B, pas de détecteurs automatiques : le CMSI sait seulement quelle ZONE de DM a été actionnée. Il applique le tableau de correspondance.', 'detect');
+        else this.explain('🔴 L\'ECS reçoit une alarme feu de la zone ' + zdId + ' « ' + z.def.name + ' » (' + (srcType === 'DM' ? 'déclencheur manuel actionné' : 'détecteur automatique') + '). Le buzzer d\'alarme restreinte sonne pour prévenir le personnel. L\'ECS transmet l\'information au CMSI.', 'detect');
         this.cmsiProcess(zdId, srcType);
       }
     }
@@ -578,9 +583,10 @@
     /* -------------------------------- UGA ----------------------------- */
     ugaTrigger(src) {
       const u = this.uga;
-      const tempo = this.b.tempo;
+      const tempo = this.tempo;
       if (u.state === 'veille' || u.state === 'arretProcessus') {
         if (tempo > 0 && (src === 'DI' || this.b.dmTempo)) {
+          if (tempo > 300) this.explain('⏱ La temporisation est réglée à ' + Math.round(tempo / 60) + ' min. C\'est plus que les 5 minutes maximum autorisées : anomalie à relever.', 'warn', 'tempo_long');
           u.state = 'tempo'; u.remain = tempo; u.buzzer = true; u.src = src;
           this.journal('UGA : processus d\'alarme lancé — temporisation ' + Math.round(tempo / 60) + ' min', 'alarm');
           this.explain('⏳ Le processus d\'alarme démarre : temporisation de ' + Math.round(tempo / 60) + ' min (5 min maximum). Pendant ce temps, le personnel fait la LEVÉE DE DOUTE. Sans action, l\'alarme générale d\'évacuation partira automatiquement à la fin du décompte.', 'alarm');
@@ -650,7 +656,7 @@
 
     unlockExits(why) {
       let n = 0;
-      Object.values(this.openings).forEach(o => { if (o.def.locked && o.locked) { o.locked = false; n++; } });
+      Object.values(this.openings).forEach(o => { if (o.def.locked && o.locked && !o.stuck) { o.locked = false; n++; } });
       if (n) {
         this.journal('Déverrouillage des issues de secours (' + why + ')', 'cmd');
         this.explain('🟩 Les ' + n + ' issues de secours verrouillées sont déverrouillées (' + why + ').' + (why.includes('EA 1') ? ' Avec un équipement d\'alarme de type 1, c\'est immédiat dès la détection, sans attendre la fin de la temporisation.' : ''), 'cmd');
@@ -709,7 +715,13 @@
       if (!d || d.state === 'actionne') return;
       d.state = 'actionne';
       this.flag('dmPressed');
-      this.journal('Déclencheur manuel actionné : ' + id + ' — ' + this.roomName(d.def.room), 'alarm');
+      if (d.fault) { this.journal('Déclencheur manuel ' + id + ' actionné : aucune alarme', 'warn', true); this.explain('⚠️ Le déclencheur manuel ' + id + ' est hors d\'usage : on l\'actionne et rien ne se passe. Défaut grave, non signalé au tableau.', 'warn'); return; }
+      this.journal('Déclencheur manuel actionné : ' + id + ' — ' + this.roomName(d.def.room), 'alarm', !['A', 'B'].includes(this.b.category));
+      if (this.b.category === 'D') {
+        this.explain('🟥 Un déclencheur manuel est actionné. En catégorie D, il est relié au BAAS principal (Pr) qui lance l\'alarme générale sur tous les BAAS satellites. Aucune mise en sécurité automatique : les DAS se commandent au DCMR.', 'detect');
+        this.ugaTrigger('DM');
+        return;
+      }
       if (this.b.category === 'C') {
         this.explain('🟥 Un déclencheur manuel est actionné. En catégorie C, il est relié à l\'UGA 2 qui lance immédiatement l\'alarme générale. L\'UGA 2 ne dit pas QUEL déclencheur a été actionné : il faut chercher la vitre brisée.', 'detect');
         this.ugaTrigger('DM');
@@ -723,6 +735,23 @@
       d.state = 'veille';
       this.journal('Réarmement du déclencheur manuel ' + id + ' (clé)', 'ok');
       this.flag('dmReset');
+    }
+    pressBAAS(id) {
+      const d = this.devices[id];
+      if (!d) return;
+      d.state = 'actionne';
+      this.flag('dmPressed');
+      this.journal('BAAS Ma actionné : ' + this.roomName(d.def.room), 'alarm');
+      this.explain('🔔 Équipement d\'alarme de type 3 : le bloc autonome (BAAS Ma) se déclenche par son propre organe de commande. Pas de tableau, pas de zone : c\'est l\'alarme la plus simple.', 'detect', 'baasma');
+      this.startAG('BAAS Ma');
+    }
+    stopBAAS(id) {
+      const d = this.devices[id];
+      Object.values(this.devices).forEach(x => { if (x.def.type === 'BAASMA') x.state = 'veille'; });
+      if (this.uga.state === 'ag') this.ugaStopAG();
+      this.uga.state = 'veille';
+      this.flag('ugaReset');
+      this.journal('Arrêt de l\'alarme (clé du BAAS Ma)', 'ok');
     }
     pressDMV(id) {
       const d = this.devices[id];
@@ -761,11 +790,12 @@
       this.journal((o.open ? 'Ouverture' : 'Fermeture') + ' manuelle de la porte ' + id, 'info');
       return { ok: true };
     }
-    wedgeDoor(id, on) {
+    wedgeDoor(id, on, silent) {
       const o = this.openings[id];
       if (!o) return;
       o.wedged = on;
       if (on) o.open = true;
+      if (silent) return;
       if (!on) { this.flag('unwedge'); this.explain('✅ Cale retirée : la porte peut à nouveau se fermer. Si l\'ordre de compartimentage est toujours actif, elle se ferme maintenant.', 'ok'); }
       this.journal((on ? 'Porte calée : ' : 'Cale retirée : ') + id, 'warn');
     }
@@ -773,6 +803,7 @@
       const d = this.devices[id];
       d.test = true;
       d.testUntil = this.t + 8;
+      this.flag('diTest');
       this.journal('Essai aérosol sur ' + id, 'info');
       this.explain('🧪 Essai au générateur d\'aérosol : on simule de la fumée sur le détecteur ' + id + '. Il doit passer en alarme et l\'ECS doit afficher la bonne zone.', 'tip', 'aerosol');
     }
@@ -802,12 +833,27 @@
         a.done = true;
         const r = this.rooms[a.room];
         let msg;
-        if (r.fire && r.fire.stage !== 'éteint') { msg = 'FEU CONFIRMÉ dans ' + this.roomName(a.room) + ' (' + (r.fire.Q < 250 ? 'feu naissant' : r.fire.Q < 1000 ? 'feu bien installé' : 'feu violent') + ')'; this.flag('fireConfirmed'); a.fire = true; }
+        if (r.s > 0.65 || (r.fire && r.fire.stage === 'développé')) { msg = 'Impossible d\'entrer dans ' + this.roomName(a.room) + ' : fumée épaisse et chaleur. L\'agent referme la porte et se replie'; this.flag('fireConfirmed'); a.fire = true; a.noEntry = true; Object.values(this.openings).forEach(o => { if ((o.def.a === a.room || o.def.b === a.room) && o.def.kind === 'door' && !o.wedged) o.open = false; }); }
+        else if (r.fire && r.fire.stage !== 'éteint') { msg = 'FEU CONFIRMÉ dans ' + this.roomName(a.room) + ' (' + (r.fire.Q < 250 ? 'feu naissant' : r.fire.Q < 1000 ? 'feu bien installé' : 'feu violent') + ')'; this.flag('fireConfirmed'); a.fire = true; }
         else if (r.s > 0.07) { msg = 'Fumée sans feu visible dans ' + this.roomName(a.room); this.flag('smokeOnly'); }
         else { msg = 'Rien à signaler dans ' + this.roomName(a.room) + ' : pas de fumée, pas de feu'; this.flag('noFire'); a.fire = false; }
         this.flag('agentReport');
         this.journal('Levée de doute : ' + msg, a.fire ? 'fire' : 'ok');
         this.emit('agent', { msg, fire: a.fire, room: a.room });
+      }
+      // ronde d'un niveau
+      const p = this.patrolTask;
+      if (p && !p.done && this.t >= p.eta) { p.done = true; this.patrolReport(p.level); }
+      const dt2 = this.doorTask;
+      if (dt2 && !dt2.done && this.t >= dt2.eta) {
+        dt2.done = true;
+        const o = this.openings[dt2.id];
+        let msg;
+        if (o.burnt) msg = 'Porte ' + dt2.id + ' détruite par le feu';
+        else if (o.wedged) { o.wedged = false; this.flag('unwedge'); msg = 'Porte ' + dt2.id + ' trouvée CALÉE ouverte : l\'agent retire la cale' + (o.das && o.das.ordered ? ', la porte se ferme' : ''); }
+        else msg = 'Porte ' + dt2.id + ' ' + (o.open ? 'ouverte' : 'fermée') + (o.das ? (o.das.state === 'PS' ? ' (hors ventouse)' : ' (sur ventouse)') : '') + (o.def.locked ? (o.locked ? ', verrouillée' : ', déverrouillée') : '');
+        this.journal('Radio : ' + msg, o.wedged ? 'warn' : 'ok');
+        this.emit('agent', { msg, patrol: true, lines: [msg] });
       }
       // arrivée des secours
       const fm = this.firemen;
@@ -818,6 +864,46 @@
         this.explain('🚒 Les sapeurs-pompiers arrivent et attaquent le feu. Ils peuvent te demander l\'état du SSI, l\'arrêt d\'un ventilateur (arrêt pompiers) ou la commande d\'une zone de désenfumage.', 'ok');
         Object.values(this.rooms).forEach(r => { if (r.fire && r.fire.stage !== 'éteint') r.fire.attack = 'sapeurs-pompiers'; });
       }
+    }
+
+    patrol(li) {
+      if (this.patrolTask && !this.patrolTask.done) return { ok: false, msg: 'Une ronde est déjà en cours.' };
+      const eta = 45 + li * 20;
+      this.patrolTask = { level: li, eta: this.t + eta, done: false };
+      this.flag('patrol');
+      this.journal('Ronde demandée au niveau ' + this.b.levels[li].name, 'info');
+      return { ok: true, eta };
+    }
+    checkDoor(id) {
+      if (this.doorTask && !this.doorTask.done) return { ok: false, msg: 'Un agent est déjà en route vers une porte.' };
+      const li = this.levelOf[this.openings[id].def.a];
+      const eta = 35 + li * 15;
+      this.doorTask = { id, eta: this.t + eta, done: false };
+      this.journal('Agent envoyé vérifier la porte ' + id, 'info');
+      return { ok: true, eta };
+    }
+    patrolReport(li) {
+      const L = this.b.levels[li], lines = [];
+      const rooms = Object.values(this.rooms).filter(r => r.level === li);
+      const smoky = rooms.filter(r => r.s > 0.12).sort((a, c) => c.s - a.s);
+      const heavy = smoky.filter(r => r.s > 0.55);
+      smoky.slice(0, 5).forEach(r => lines.push((r.s > 0.55 ? 'Fumée épaisse' : 'Fumée') + ' : ' + r.def.name));
+      rooms.filter(r => r.fire && r.fire.stage !== 'éteint' && r.def.kind !== 'local').forEach(r => lines.push('Flammes visibles : ' + r.def.name));
+      Object.values(this.openings).filter(o => this.levelOf[o.def.a] === li && o.das).forEach(o => {
+        if (o.wedged) lines.push('Porte coupe-feu ' + o.def.id + ' bloquée ouverte (calée)');
+        else if (o.das.ordered && o.das.state !== 'PS') lines.push('Porte coupe-feu ' + o.def.id + ' NON fermée');
+        else if (!o.das.ordered && o.das.state === 'PS') lines.push('Porte coupe-feu ' + o.def.id + ' fermée (pas sur ventouse)');
+      });
+      Object.values(this.das).filter(d => d.ref && this.devices[d.ref] && this.levelOf[this.devices[d.ref].def.room] === li && d.ordered && d.state !== 'PS').forEach(d => lines.push(d.label + ' ' + d.ref + ' : pas ouvert / pas en position de sécurité'));
+      Object.values(this.devices).filter(d => d.def.type === 'DS' && d.fault && this.levelOf[d.def.room] === li && this.uga.state === 'ag').forEach(d => lines.push('Diffuseur ' + d.def.id + ' muet'));
+      const blocked = rooms.filter(r => r.blocked && r.occ > 0.5);
+      blocked.forEach(r => lines.push(Math.ceil(r.occ) + ' personne(s) bloquée(s) : ' + r.def.name));
+      const left = rooms.reduce((a, r) => a + r.occ, 0);
+      if (this.uga.state === 'ag' || this.uga.state === 'arretAG') lines.push(left > 0.5 ? 'Évacuation en cours : environ ' + Math.ceil(left) + ' personne(s) encore au niveau' : 'Niveau évacué');
+      const msg = 'Ronde ' + L.name + ' : ' + (lines.length ? lines.join(' · ') : 'rien d\'anormal');
+      this.flag('patrolReport');
+      this.journal(msg, heavy.length || lines.some(l => l.includes('calée') || l.includes('NON')) ? 'warn' : 'ok');
+      this.emit('agent', { msg, fire: heavy.length > 0, patrol: true, lines, level: li });
     }
 
     agentExtinguisher() {
@@ -858,10 +944,15 @@
 
     stepOccupants(dt) {
       const ag = this.uga.state === 'ag' || this.uga.state === 'arretAG';
+      if (!this._dsLevels) {
+        this._dsLevels = {};
+        Object.values(this.devices).forEach(d => { if (d.def.type === 'DS') { const li = this.levelOf[d.def.room]; (this._dsLevels[li] = this._dsLevels[li] || []).push(d); } });
+      }
+      const heard = li => { const l = this._dsLevels[li]; return !l || l.some(d => !d.fault); };
       const exitsLocked = this.b.ugcis && Object.values(this.openings).every(o => !o.def.locked || o.locked);
       Object.values(this.rooms).forEach(r => {
         if (r.occ <= 0) return;
-        const alerted = ag || r.s > 0.2 || (r.fire && r.fire.Q > 40 && r.fire.stage !== 'éteint');
+        const alerted = (ag && heard(r.level)) || r.s > 0.2 || (r.fire && r.fire.Q > 40 && r.fire.stage !== 'éteint');
         if (!alerted) return;
         if (r.evacStart === null) r.evacStart = this.t + 15 + ((r.def.id.length * 7) % 45);
         if (this.t < r.evacStart) return;
@@ -895,9 +986,12 @@
     /* --------------------------- FORMATEUR ---------------------------- */
     setFault(kind, id, value) {
       if (kind === 'das') { const d = this.das[id]; if (d) d.fault = value; }
-      if (kind === 'di') { const d = this.devices[id]; if (d) d.fault = value; }
+      if (kind === 'di' || kind === 'dev') { const d = this.devices[id]; if (d) d.fault = value; }
+      if (kind === 'tempo') this.tempo = value;
+      if (kind === 'wedge') this.wedgeDoor(id, value, true);
       if (kind === 'fan') { const f = this.fans[id]; if (f) { f.fault = value; f.faultSaid = false; } }
       if (kind === 'secteur') {
+        if (value) this.flag('secteurTest');
         this.power.secteur = !value;
         this.journal(value ? 'Coupure de l\'alimentation secteur' : 'Retour secteur', 'warn');
         if (value) this.explain('🔋 Coupure secteur : l\'ECS et le CMSI passent sur leurs batteries. Le voyant « Défaut alimentation » s\'allume. Le système reste opérationnel.', 'warn');

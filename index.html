@@ -31,6 +31,10 @@
     <div><b>En bas, « Comprendre »</b><span>Chaque réaction du système est expliquée en clair, au moment où elle arrive.</span></div>
   </section>
 
+  <div class="modes">
+    <label class="student-toggle"><input type="checkbox" id="studentMode"><span><b>Vue élève SSIAP 2</b> — plan masqué : tu ne vois ni le feu, ni la fumée, ni les portes. Tu déduis la situation depuis la façade, le plan des zones et la radio.</span></label>
+    <p class="cats">Du plus simple au plus complet : catégorie <b>E</b> → <b>D</b> → <b>C</b> → <b>B</b> → <b>A</b>.</p>
+  </div>
   <section class="buildings" id="buildings"></section>
 
   <footer class="home-foot">
@@ -54,6 +58,7 @@
     </div>
     <button class="tb-btn call" data-tb="call" title="Appeler les sapeurs-pompiers">☎ Appeler le 18</button>
     <button class="tb-btn" data-tb="sound" title="Son">🔊</button>
+    <button class="tb-btn reveal" data-tb="reveal" hidden>👁 Révéler</button>
     <button class="tb-btn" data-tb="trainer" title="Mode formateur : pannes et incidents">Formateur</button>
     <button class="tb-btn" data-tb="restart" title="Recommencer">↺</button>
   </header>
@@ -68,6 +73,7 @@
           <span><i class="lg fire"></i>Feu</span><span><i class="lg smoke"></i>Fumée</span>
           <span><i class="lg cf"></i>Porte CF</span><span><i class="lg das"></i>Désenfumage</span><span><i class="lg air"></i>Amenée d'air</span><span><i class="lg occ"></i>Occupants</span>
         </div>
+        <button class="zones-btn" data-zonesbtn title="Afficher le plan des zones de détection">Plan des zones</button>
         <span class="bld-hint">Clique sur un local ou un équipement</span>
       </div>
       <div class="plan-wrap" id="plan"></div>
@@ -99,6 +105,7 @@
 <script src="js/engine.js"></script>
 <script src="js/fiches.js"></script>
 <script src="js/missions.js"></script>
+<script src="js/cds.js"></script>
 <script src="js/sound.js"></script>
 <script src="js/panel.js"></script>
 <script src="js/plan.js"></script>

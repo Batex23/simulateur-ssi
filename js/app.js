@@ -9,6 +9,26 @@
   const fmt = t => window.SSIfmt(t);
   const B = window.SSI_BUILDINGS, MIS = window.SSI_MISSIONS, FI = window.SSI_FICHES;
 
+  /* ------------------------- PROGRESSION (navigateur) ------------------------- */
+  const GRADES = [
+    { min: 0, t: 'Agent de sécurité', s: 'SSIAP 1' },
+    { min: 4, t: 'Chef d\'équipe', s: 'SSIAP 2' },
+    { min: 10, t: 'Chef de service', s: 'SSIAP 3' },
+    { min: 18, t: 'Préventionniste', s: 'PRV' }
+  ];
+  const Prog = {
+    load() { try { return JSON.parse(localStorage.getItem('ssi-progress') || '{}'); } catch (e) { return {}; } },
+    save(p) { try { localStorage.setItem('ssi-progress', JSON.stringify(p)); } catch (e) { /* stockage indisponible */ } },
+    points(p) {
+      const m = Object.values(p.missions || {}).reduce((a, x) => a + (x.stars || 0), 0);
+      const c = Object.values(p.cds || {}).reduce((a, x) => a + (x.best || 0), 0);
+      return m + c;
+    },
+    grade(pts) { let g = GRADES[0]; GRADES.forEach(x => { if (pts >= x.min) g = x; }); return g; },
+    next(pts) { return GRADES.find(x => x.min > pts); }
+  };
+  const stars = n => '★★★'.slice(0, n) + '☆☆☆'.slice(0, 3 - n);
+
   const App = {
     sim: null, panel: null, plan: null, speed: 1, paused: false, trainer: false,
     sound: new window.SSISound(), mission: null, missionId: null, lastUi: 0, ended: false,
@@ -23,6 +43,7 @@
         const levels = b.levels.length;
         const sect = Array.from({ length: levels }, (_, i) => `<rect x="10" y="${8 + (levels - 1 - i) * 18}" width="${80 + (b.fans.length ? 0 : 0)}" height="16" rx="1"/>`).join('');
         const mis = (b.missions || []).map(id => MIS[id]).filter(Boolean);
+        const prog = Prog.load();
         card.innerHTML = `
           <div class="bcard-top">
             <svg class="bsect" viewBox="0 0 100 ${levels * 18 + 14}" aria-hidden="true">${sect}${b.fans.length ? '<circle cx="78" cy="3" r="3"/><circle cx="88" cy="3" r="3"/>' : ''}<line x1="0" x2="100" y1="${levels * 18 + 8}" y2="${levels * 18 + 8}"/></svg>
@@ -37,7 +58,7 @@
           <div class="bactions">
             <button class="go free" data-b="${b.id}">Mode libre</button>
             <button class="go cds" data-b="${b.id}" data-cds="1"><b>Essais en commission de sécurité</b><small>Anomalies cachées</small></button>
-            ${mis.map(m => `<button class="go mis" data-b="${b.id}" data-m="${Object.keys(MIS).find(k => MIS[k] === m)}"><b>${esc(m.title)}</b><small>${esc(m.level)}</small></button>`).join('')}
+            ${mis.map(m => { const id = Object.keys(MIS).find(k => MIS[k] === m); const st = (prog.missions || {})[id]; return `<button class="go mis" data-b="${b.id}" data-m="${id}"><b>${esc(m.title)}</b><small>${esc(m.level)} <span class="stars${st ? ' got' : ''}">${stars(st ? st.stars : 0)}</span></small></button>`; }).join('')}
           </div>`;
         wrap.appendChild(card);
       });
@@ -50,8 +71,22 @@
       const st = $('#studentMode');
       try { st.checked = localStorage.getItem('ssi-student') === '1'; } catch (e) { /* stockage indisponible */ }
       st.onchange = () => { try { localStorage.setItem('ssi-student', st.checked ? '1' : '0'); } catch (e) { /* rien */ } };
+      this.renderProgress();
       $('#home').hidden = false; $('#sim').hidden = true;
       document.title = 'Simulateur SSI';
+    },
+
+    renderProgress() {
+      const p = Prog.load(), pts = Prog.points(p), g = Prog.grade(pts), nx = Prog.next(pts);
+      const nMis = Object.keys(MIS).length, done = Object.values(p.missions || {}).filter(x => x.stars > 0).length;
+      const visits = Object.values(p.cds || {}).reduce((a, x) => a + (x.visits || 0), 0);
+      const box = $('#progress');
+      if (!box) return;
+      box.innerHTML = `<div class="badge-card"><div class="bc-strip"><span>${g.s}</span></div><div class="bc-body"><small>Carte de progression</small><b>${g.t}</b>
+          <div class="bc-bar"><i style="width:${nx ? Math.round((pts - g.min) / (nx.min - g.min) * 100) : 100}%"></i></div>
+          <span>${pts} point${pts > 1 ? 's' : ''}${nx ? ' · encore ' + (nx.min - pts) + ' pour « ' + nx.t + ' »' : ' · grade maximal'}</span></div></div>
+        <div class="pg-stats"><div><b>${done}/${nMis}</b><span>missions réussies</span></div><div><b>${visits}</b><span>visites de commission</span></div></div>
+        <p class="pg-note">1 à 3 étoiles par mission, 1 à 3 points par bâtiment en commission de sécurité. La progression reste dans ce navigateur.</p>`;
     },
 
     /* ---------------------------- DÉMARRAGE -------------------------- */
@@ -479,6 +514,8 @@
     debrief() {
       const s = this.sim, m = this.mission, st = s.stats();
       const ok = Object.keys(m.done).length, tot = m.objectives.length;
+      const nStars = ok === tot && st.danger === 0 ? 3 : ok / tot >= 0.7 ? 2 : ok / tot >= 0.4 ? 1 : 0;
+      { const p = Prog.load(); p.missions = p.missions || {}; const prev = p.missions[this.missionId] || { stars: 0 }; const before = Prog.grade(Prog.points(p)); p.missions[this.missionId] = { stars: Math.max(prev.stars, nStars), last: nStars }; Prog.save(p); const after = Prog.grade(Prog.points(p)); this._promo = after !== before ? after : null; }
       const F = s.flags;
       const key = [
         ['Première alarme feu', Object.values(s.zd).map(z => z.first).filter(x => x !== null)[0] ?? (F.dmPressed ?? F.ag)],
@@ -487,7 +524,7 @@
       if (this.student && !this.revealed) this.reveal(true);
       const box = $('#modal'), mb = box.querySelector('.modal-box');
       mb.className = 'modal-box debrief';
-      mb.innerHTML = `<p class="rep-from">Bilan de mission</p><h3>${esc(m.title)} — ${ok} / ${tot} objectifs</h3>
+      mb.innerHTML = `<p class="rep-from">Bilan de mission</p><div class="big-stars">${stars(nStars)}</div><h3>${esc(m.title)} — ${ok} / ${tot} objectifs</h3>${this._promo ? `<p class="promo">🎖️ Promotion : tu passes <b>${esc(this._promo.t)}</b> (${this._promo.s})</p>` : ''}
         <div class="occ-sum"><div><b>${st.evac}</b><span>évacués</span></div><div><b>${st.inside}</b><span>encore dedans</span></div><div class="${st.danger ? 'bad' : ''}"><b>${st.danger}</b><span>en atmosphère enfumée</span></div><div><b>${fmt(s.t)}</b><span>durée</span></div></div>
         <div class="deb-cols"><div><h4>Objectifs</h4><ul class="deb-obj">${m.objectives.map((o, i) => `<li class="${i in m.done ? 'done' : i in m.failed ? 'failed' : 'miss'}">${esc(o.text)}${i in m.done ? ' <time>' + fmt(m.done[i]) + '</time>' : ''}</li>`).join('')}</ul></div>
         <div><h4>Chronologie</h4><ul class="deb-time">${key.map(k => `<li><time>${fmt(k[1])}</time>${k[0]}</li>`).join('')}</ul></div></div>
@@ -744,9 +781,11 @@
       this.ended = true;
       if (this.student && !this.revealed) this.reveal();
       const nFound = ev.found.filter(a => a.found).length;
+      const cdsPts = (ev.avisOk ? 1 : 0) + (c.anomalies.length ? (nFound === c.anomalies.length ? 1 : 0) : 1) + (ev.falseNc.length === 0 && ev.notDone.length === 0 ? 1 : 0);
+      { const p = Prog.load(); p.cds = p.cds || {}; const prev = p.cds[s.b.id] || { best: 0, visits: 0 }; p.cds[s.b.id] = { best: Math.max(prev.best, cdsPts), visits: prev.visits + 1 }; Prog.save(p); }
       const box = $('#modal'), mb = box.querySelector('.modal-box');
       mb.className = 'modal-box debrief';
-      mb.innerHTML = `<p class="rep-from">Bilan des essais</p><h3>${c.anomalies.length ? nFound + ' anomalie(s) trouvée(s) sur ' + c.anomalies.length : 'Aucune anomalie n\'était cachée'}</h3>
+      mb.innerHTML = `<p class="rep-from">Bilan des essais</p><div class="big-stars">${stars(cdsPts)}</div><h3>${c.anomalies.length ? nFound + ' anomalie(s) trouvée(s) sur ' + c.anomalies.length : 'Aucune anomalie n\'était cachée'}</h3>
         <div class="occ-sum"><div class="${ev.avisOk ? '' : 'bad'}"><b>${ev.avisOk ? '✓' : '✗'}</b><span>avis ${esc(c.avis)} (attendu : ${ev.expected})</span></div><div><b>${ev.falseNc.length}</b><span>non-conformité(s) sans fondement</span></div><div><b>${ev.notDone.length}</b><span>point(s) non renseigné(s)</span></div><div><b>${fmt(s.t)}</b><span>durée de la visite</span></div></div>
         <h4>Anomalies cachées</h4>
         <ul class="deb-obj">${ev.found.length ? ev.found.map(a => `<li class="${a.found ? 'done' : 'failed'}">${esc(a.text)} <small>${a.major ? '— motive un avis défavorable' : '— observation'}</small></li>`).join('') : '<li class="done">Aucune : le SSI était conforme.</li>'}</ul>

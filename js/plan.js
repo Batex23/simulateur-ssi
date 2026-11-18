@@ -5,9 +5,9 @@
   'use strict';
   const NS = 'http://www.w3.org/2000/svg';
   const K = 20;           // px par mètre
-  const GAP = 46;         // espace entre niveaux (px)
+  const GAP = 70;         // espace entre niveaux (px)
   const ROOF = 64;        // bande technique en toiture
-  const PAD = 26;
+  const PAD = 34;
 
   const el = (tag, attrs = {}, parent) => {
     const e = document.createElementNS(NS, tag);
@@ -38,6 +38,9 @@
         <radialGradient id="flame"><stop offset="0" stop-color="#fff6c2"/><stop offset=".35" stop-color="#ffb400"/><stop offset=".7" stop-color="#ff4b1f" stop-opacity=".85"/><stop offset="1" stop-color="#c8102e" stop-opacity="0"/></radialGradient>
         <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#9aa5ad" stroke-width="1"/></pattern>
         <linearGradient id="smk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b3f44"/><stop offset="1" stop-color="#5d6268"/></linearGradient>
+        <filter id="smokeNoise" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="3" seed="7"/><feColorMatrix values="0 0 0 0 0.24  0 0 0 0 0.25  0 0 0 0 0.27  0 0 0 -1.1 1.15"/></filter>
+        <pattern id="smokeTex" width="420" height="420" patternUnits="userSpaceOnUse"><rect width="420" height="420" fill="#4a4e54"/><rect width="420" height="420" filter="url(#smokeNoise)"/></pattern>
+        ${this.sim.b.zd.map(z => `<pattern id="zh-${z.id}" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="9" height="9" fill="${this.zoneColor(z.id)}" opacity=".10"/><line x1="0" y1="0" x2="0" y2="9" stroke="${this.zoneColor(z.id)}" stroke-width="2.2" opacity=".55"/></pattern>`).join('')}
         <marker id="arr" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>`;
 
       this.roomEls = {}; this.openEls = {}; this.devEls = {};
@@ -47,9 +50,26 @@
 
       b.levels.forEach((L, li) => {
         const g = el('g', { transform: `translate(${PAD},${this.levelY[li]})`, class: 'level' }, svg);
-        const lab = el('text', { x: -4, y: -10, class: 'lvl-label' }, g);
-        lab.textContent = L.name;
-        el('rect', { x: -3, y: -3, width: L.w * K + 6, height: L.h * K + 6, class: 'slab' }, g);
+        const lab = el('text', { x: 0, y: -16, class: 'lvl-label' }, g);
+        lab.textContent = 'NIVEAU ' + L.name;
+        // cartouche, nord, échelle : comme sur un plan d'intervention
+        const cw = 250, cx0 = L.w * K - cw;
+        const ct = el('g', { class: 'cartouche', transform: `translate(${cx0},-46)` }, g);
+        el('rect', { width: cw, height: 34 }, ct);
+        el('line', { x1: 168, x2: 168, y1: 0, y2: 34 }, ct);
+        el('text', { x: 6, y: 13, class: 'ct-t' }, ct).textContent = 'PLAN D\'INTERVENTION — ' + L.name;
+        el('text', { x: 6, y: 27, class: 'ct-s' }, ct).textContent = b.name.toUpperCase().slice(0, 30);
+        el('text', { x: 174, y: 13, class: 'ct-s' }, ct).textContent = 'Éch. 1/200';
+        el('text', { x: 174, y: 27, class: 'ct-s' }, ct).textContent = 'SSI cat. ' + b.category;
+        const nb = el('g', { class: 'north', transform: `translate(${cx0 - 24},-30)` }, g);
+        el('path', { d: 'M0,-14 L6,6 L0,2 L-6,6 Z' }, nb);
+        el('text', { x: 0, y: 17, 'text-anchor': 'middle' }, nb).textContent = 'N';
+        const sb = el('g', { class: 'scalebar', transform: `translate(${cx0 - 40 - 5 * K},-24)` }, g);
+        el('rect', { width: 2.5 * K, height: 4, class: 'sb-a' }, sb);
+        el('rect', { x: 2.5 * K, width: 2.5 * K, height: 4, class: 'sb-b' }, sb);
+        el('text', { x: 0, y: -4 }, sb).textContent = '0';
+        el('text', { x: 5 * K, y: -4, 'text-anchor': 'end' }, sb).textContent = '5 m';
+        el('rect', { x: -2, y: -2, width: L.w * K + 4, height: L.h * K + 4, class: 'slab' }, g);
         const gRooms = el('g', {}, g), gSmoke = el('g', { class: 'smoke-layer' }, g), gWalls = el('g', {}, g),
           gOpen = el('g', {}, g), gDev = el('g', {}, g), gTxt = el('g', {}, g);
         L.rooms.forEach(r => {
@@ -66,11 +86,13 @@
           const cx = x + w / 2, cy = y0 + hh / 2;
           el('circle', { cx, cy, r: 10, fill: 'url(#flame)', class: 'flame' }, fire);
           el('rect', { x, y: y0, width: w, height: hh, class: 'wall' }, gWalls);
-          const name = el('text', { x: x + 4, y: y0 + 11, class: 'room-name' + (w < 70 ? ' tiny' : '') }, gTxt);
-          name.textContent = r.kind === 'stair' ? 'Escalier' : w < 70 ? r.name.replace('Ch. ', '') : r.name;
+          const circ = r.kind === 'circ' || r.kind === 'hall';
+          const name = el('text', { x: circ ? x + 8 : x + w / 2, y: y0 + 13, 'text-anchor': circ ? 'start' : 'middle', class: 'room-name' + (w < 90 ? ' tiny' : '') }, gTxt);
+          name.textContent = (r.kind === 'stair' ? 'ESC.' : w < 90 ? r.name.replace('Ch. ', 'CH ') : r.name).toUpperCase();
+          if (r.kind === 'stair') { const ar = el('path', { d: `M${x + w / 2},${y0 + hh - 14} V${y0 + 30}`, class: 'stair-arrow', 'marker-end': 'url(#arr)' }, gTxt); }
           const occ = el('text', { x: x + w - 4, y: y0 + hh - 5, class: 'occ', 'text-anchor': 'end' }, gTxt);
           if (r.zd) {
-            el('rect', { x: x + 1.5, y: y0 + 1.5, width: w - 3, height: hh - 3, class: 'zone-tint', fill: this.zoneColor(r.zd) }, gRooms).style.pointerEvents = 'none';
+            el('rect', { x: x + 1.5, y: y0 + 1.5, width: w - 3, height: hh - 3, class: 'zone-tint', fill: 'url(#zh-' + r.zd + ')' }, gRooms).style.pointerEvents = 'none';
             const zl = el('text', { x: x + 4, y: y0 + hh - 5, class: 'zone-label' }, gTxt);
             zl.textContent = r.zd;
           }

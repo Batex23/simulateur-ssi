@@ -7,7 +7,7 @@
 <meta name="description" content="Simulateur pédagogique de système de sécurité incendie : façade ECS / CMSI et bâtiment virtuel (feu, fumée, compartimentage, désenfumage, évacuation).">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700;800&family=VT323&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700;800&family=Kalam:wght@400;700&family=VT323&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8102e'/><circle cx='16' cy='16' r='7' fill='%23ffd23f'/></svg>">
 </head>
@@ -31,6 +31,7 @@
     <div><b>En bas, « Comprendre »</b><span>Chaque réaction du système est expliquée en clair, au moment où elle arrive.</span></div>
   </section>
 
+  <section class="progress" id="progress"></section>
   <div class="modes">
     <label class="student-toggle"><input type="checkbox" id="studentMode"><span><b>Vue élève SSIAP 2</b> — plan masqué : tu ne vois ni le feu, ni la fumée, ni les portes. Tu déduis la situation depuis la façade, le plan des zones et la radio.</span></label>
     <p class="cats">Du plus simple au plus complet : catégorie <b>E</b> → <b>D</b> → <b>C</b> → <b>B</b> → <b>A</b>.</p>
@@ -82,7 +83,7 @@
       <div class="drawer">
         <nav class="tabs" role="tablist">
           <button data-tab="explain" class="on">Comprendre</button>
-          <button data-tab="log">Journal</button>
+          <button data-tab="log">Main courante</button>
           <button data-tab="corr">Correspondance</button>
           <button data-tab="occ">Occupants</button>
         </nav>

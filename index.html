@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulateur SSI</title>
+<meta name="description" content="Simulateur pédagogique de système de sécurité incendie : façade ECS / CMSI et bâtiment virtuel (feu, fumée, compartimentage, désenfumage, évacuation).">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700;800&family=VT323&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c8102e'/><circle cx='16' cy='16' r='7' fill='%23ffd23f'/></svg>">
+</head>
+<body>
+
+<!-- ========================= ACCUEIL ========================= -->
+<main id="home" class="home">
+  <header class="home-head">
+    <div class="home-title">
+      <svg class="home-mark" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="8" fill="#d7d9d2" stroke="#8d938a" stroke-width="2"/><circle cx="18" cy="18" r="6" fill="#c8102e"/><circle cx="32" cy="18" r="6" fill="#f2b200"/><circle cx="46" cy="18" r="6" fill="#12924a"/><rect x="11" y="32" width="42" height="20" rx="2" fill="#1d3b2a"/><text x="32" y="46" text-anchor="middle" font-family="VT323" font-size="13" fill="#9cf2a9">FEU ZD1</text></svg>
+      <div>
+        <h1>Simulateur SSI</h1>
+        <p>Manipule un système de sécurité incendie et regarde, en direct, ce qu'il fait dans le bâtiment. Et l'inverse.</p>
+      </div>
+    </div>
+  </header>
+
+  <section class="how">
+    <div><b>À gauche, la façade</b><span>ECS, CMSI, UGA, commandes et voyants, avec la clé de niveau d'accès.</span></div>
+    <div><b>À droite, le bâtiment</b><span>Allume un feu, actionne un déclencheur, ouvre une porte, cale-la… et observe la fumée.</span></div>
+    <div><b>En bas, « Comprendre »</b><span>Chaque réaction du système est expliquée en clair, au moment où elle arrive.</span></div>
+  </section>
+
+  <section class="buildings" id="buildings"></section>
+
+  <footer class="home-foot">
+    Outil pédagogique conçu pour la formation des préventionnistes, des agents SSIAP et des sapeurs-pompiers. Les bâtiments et les comportements sont simplifiés : ils ne remplacent ni les textes, ni une étude réglementaire.
+    Références : Guide des systèmes de sécurité incendie (éd. 2025), règlement de sécurité ERP, IT 246, normes NF S 61-930 à 61-970. Contenus à faire valider par un préventionniste.
+  </footer>
+</main>
+
+<!-- ========================= SIMULATEUR ========================= -->
+<div id="sim" class="sim" hidden>
+  <header class="topbar">
+    <button class="tb-btn back" data-tb="home" title="Retour aux bâtiments">◂ Bâtiments</button>
+    <div class="tb-title"><b data-bname></b><span data-btype></span></div>
+    <div class="clock" title="Temps simulé"><span data-clock>00:00</span></div>
+    <div class="speed" role="group" aria-label="Vitesse de simulation">
+      <button data-speed="0" title="Pause">❚❚</button>
+      <button data-speed="1" class="on">×1</button>
+      <button data-speed="5">×5</button>
+      <button data-speed="15">×15</button>
+      <button data-speed="40">×40</button>
+    </div>
+    <button class="tb-btn call" data-tb="call" title="Appeler les sapeurs-pompiers">☎ Appeler le 18</button>
+    <button class="tb-btn" data-tb="sound" title="Son">🔊</button>
+    <button class="tb-btn" data-tb="trainer" title="Mode formateur : pannes et incidents">Formateur</button>
+    <button class="tb-btn" data-tb="restart" title="Recommencer">↺</button>
+  </header>
+
+  <div class="sim-body">
+    <aside class="col-panel" id="panel" aria-label="Façade du SSI"></aside>
+
+    <section class="col-bld">
+      <div class="bld-bar">
+        <div class="lvl-chips" data-levels></div>
+        <div class="legend">
+          <span><i class="lg fire"></i>Feu</span><span><i class="lg smoke"></i>Fumée</span>
+          <span><i class="lg cf"></i>Porte CF</span><span><i class="lg das"></i>Désenfumage</span><span><i class="lg air"></i>Amenée d'air</span><span><i class="lg occ"></i>Occupants</span>
+        </div>
+        <span class="bld-hint">Clique sur un local ou un équipement</span>
+      </div>
+      <div class="plan-wrap" id="plan"></div>
+      <div class="mission-card" id="mission" hidden></div>
+
+      <div class="drawer">
+        <nav class="tabs" role="tablist">
+          <button data-tab="explain" class="on">Comprendre</button>
+          <button data-tab="log">Journal</button>
+          <button data-tab="corr">Correspondance</button>
+          <button data-tab="occ">Occupants</button>
+        </nav>
+        <div class="tab-body" data-body="explain"></div>
+        <div class="tab-body" data-body="log" hidden></div>
+        <div class="tab-body" data-body="corr" hidden></div>
+        <div class="tab-body" data-body="occ" hidden></div>
+      </div>
+    </section>
+  </div>
+
+  <aside class="trainer" id="trainer" hidden></aside>
+</div>
+
+<div class="menu" id="menu" hidden></div>
+<div class="modal" id="modal" hidden><div class="modal-box"></div></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="js/buildings.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/fiches.js"></script>
+<script src="js/missions.js"></script>
+<script src="js/sound.js"></script>
+<script src="js/panel.js"></script>
+<script src="js/plan.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
